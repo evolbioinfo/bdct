@@ -3,7 +3,8 @@ import os
 import numpy as np
 import pandas as pd
 
-from bdpn.formulas import log_subtraction, log_sum
+from bdpn import bd_model
+from bdpn.formulas import log_subtraction, log_sum, get_c1, get_E, get_c2
 from bdpn.parameter_estimator import optimize_likelihood_params, estimate_cis, rescale_log
 from bdpn.tree_manager import TIME, read_forest, annotate_forest_with_time, get_T, resolve_forest
 
@@ -25,14 +26,20 @@ EPSILON = 1e-10
 
 
 def precalc_u(T, dt, la, psi, rho, r):
+    c1 = get_c1(la, psi, rho)
+    c2 = get_c2(la, psi, c1)
     Us = [1]
-    U = 1
     psi_not_rho = psi * (1 - rho)
     la_plus_psi = la + psi
     extra_recipients = r - 1
-    for i in range(int(T / dt)):
-        U -= dt * (la_plus_psi * U - psi_not_rho - la * np.power(U, 2) * np.exp((U - 1) * extra_recipients))
-        Us.append(max(min(U, 1), 0))
+    n = int(T / dt)
+    for i in range(n):
+        U = (Us[-1] - dt
+             * (la_plus_psi * Us[-1] - psi_not_rho - la * np.power(Us[-1], 2) * np.exp((Us[-1] - 1) * extra_recipients)))
+        if U == Us[-1]:
+            Us.extend([U] * (n - i))
+            break
+        Us.append(max(min(U, Us[-1], bd_model.get_u(la, psi, c1, get_E(c1, c2, T - dt * (i + 1), T))), 0))
     return list(reversed(Us))
 
 
@@ -41,18 +48,28 @@ def get_u(t, dt, Us):
 
 
 def get_log_p(t, ti, dt, la, psi, r, Us):
-    P = 1
+    P_prev, P = 1, 1
     j = int(ti // dt)
     result = 0
     la_plus_psi = la + psi
     extra_recipients = r - 1
-    for _ in range(int((ti - t) / dt)):
-        j -= 1
-        U = Us[j]
-        P -= dt * (la_plus_psi * P - la * P * U * (2 + extra_recipients * U) * np.exp((U - 1) * extra_recipients))
-        if P < 1e-3:
+    n = int((ti - t) / dt)
+    i = 0
+    step = 1
+    while i < n:
+        U = Us[int(j)]
+        P = P_prev - dt * (la_plus_psi * P_prev - la * P_prev * U * (2 + extra_recipients * U) * np.exp((U - 1) * extra_recipients))
+        if 0 <= P < 1e-3:
             P *= SCALING_FACTOR_P
             result -= LOG_SCALING_FACTOR_P
+        if P > 0:
+            j -= step
+            i += 1
+            P_prev = P
+            continue
+        dt /= 10
+        n *= 10
+        step /= 10
     result += np.log(P)
     return result
 
@@ -343,7 +360,7 @@ def loglikelihood_main():
 
 
 def calc_dt(T, forest):
-    return max(min(T / 1000, min(min(_.dist for _ in tree.traverse() if _.dist) for tree in forest) / 3), 1e-4)
+    return max(min(T / 1000, min(min(_.dist for _ in tree.traverse() if _.dist) for tree in forest) / 3), 1e-5)
 
 
 if '__main__' == __name__:
