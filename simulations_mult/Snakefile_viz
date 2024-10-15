@@ -21,6 +21,7 @@ rule all:
     input:
         # expand(os.path.join(sim_folder,'errors_{par}.svg'), par=pars),
         expand(os.path.join(sim_folder, 'BDMULT', 'errors_{par}.svg'), par=pars),
+        expand(os.path.join(sim_folder, 'BD', 'errors_{par}.svg'), par=pars),
         expand(os.path.join(sim_folder,'BDMULT','likelihood_stats_bdmult.{par}.txt'), par=pars),
         expand(os.path.join(sim_folder, '{model}', 'CI_stats.txt'), model=['BDMULT']),
         expand(os.path.join(sim_folder, 'BD','likelihood_stats_bd.{par}.txt'), par=pars),

@@ -153,4 +153,7 @@ def log_subtraction(log_minuend, log_subtrahend):
         if factors < 0:
             factors = 0
         return MIN_VALUE - factors
+    if diff <= 0:
+        print(log_minuend, log_subtrahend)
+        raise ValueError()
     return np.log(diff) - factors

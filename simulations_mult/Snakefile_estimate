@@ -17,8 +17,8 @@ folder = os.path.abspath(config.get("folder", '.'))
 sim_folder = os.path.abspath(config.get("sf", os.path.join(folder, 'small')))
 n = int(config.get("n", 100))
 REPETITIONS = list(range(n))
-# ci = "--ci"
-ci = ""
+ci = "--ci"
+# ci = ""
 
 rule all:
     input:
@@ -49,9 +49,14 @@ rule estimate_params_p_fixed:
     shell:
         """
         p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
+        r=`tail -n 1 {input.log} | awk -F',' '{{ print $1 }}'`
+        psi=`tail -n 1 {input.log} | awk -F',' '{{ print $5 }}'`
+        la=`tail -n 1 {input.log} | awk -F',' '{{ print $4 }}'`
+        r=`echo "print(${{r}} * ${{psi}} /${{la}})" | python3`
+        p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
         cat {input.log}
 
-        bdmult_infer --p $p  --nwk {input.nwk} --log {output.est} --threads {threads} {ci}
+        bdmult_infer --p $p --r $r --nwk {input.nwk} --log {output.est} --threads {threads} {ci}
         """
 
 

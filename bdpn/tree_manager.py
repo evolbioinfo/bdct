@@ -118,6 +118,23 @@ def resolve_forest(forest, max_extra_brlen=None):
         resolve_tree(tree, max_extra_brlen)
 
 
+def rescale_forest(forest, T_target=1000, T=None):
+    annotate_forest_with_time(forest)
+    T_initial = get_T(T=T, forest=forest)
+
+    if T_initial != T_target:
+        scaling_factor = T_target / T_initial
+
+    for tree in forest:
+        for n in tree.traverse():
+            n.add_feature(TIME, getattr(n, TIME) * scaling_factor)
+            n.dist *= scaling_factor
+
+    return scaling_factor
+
+
+
+
 def read_forest(tree_path):
     try:
         roots = parse_nexus(tree_path)
