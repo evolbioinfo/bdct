@@ -89,9 +89,10 @@ def get_log_p(t, ti, tt, logdt, T, la, psi, r, Us):
     while t_prev > t:
         U = get_u(t_prev, tt, logdt, T, Us)
 
+        x = la_plus_psi - la * (2 + extra_recipients * U) * U * np.exp(extra_recipients * (U - 1))
+
         # if we can approximate U with a constant from now, we have a formula
         if U == Us[0]:
-            x = la_plus_psi - la * (2 + extra_recipients * U) * U * np.exp(extra_recipients * (U - 1))
             return np.log(P) + x * (t - t_prev)
             # return log_subtraction(np.log(P), log_subtraction(x * t_prev, x * t)) - factors
 
@@ -99,20 +100,13 @@ def get_log_p(t, ti, tt, logdt, T, la, psi, r, Us):
             P *= SCALING_FACTOR_P
             factors += LOG_SCALING_FACTOR_P
 
-        dt = min(dt, t_prev - t)
+        dt_cur = min(dt, t_prev - t) if x < 0 else max(min(dt, t_prev - t, 0.99 / x), EPSILON)
 
-        dP = la_plus_psi * P - la * P * U * (2 + extra_recipients * U) * np.exp((U - 1) * extra_recipients)
-        div = 1
-        while True:
-            dPdt = dP * dt / div
-            if dPdt < P:
-                P -= dPdt
-                break
-            else:
-                div *= 10
-            if dt / div <= EPSILON:
-                return -np.inf
-        t_prev -= dt / div
+        P -= P * (x * dt_cur)
+        if P <= 0:
+            return -np.inf
+        t_prev -= dt_cur
+
     return np.log(P) - factors
 
 
