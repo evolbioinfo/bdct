@@ -34,7 +34,7 @@ def rescale_log(log_array):
 
 
 def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_function, bounds, start_parameters,
-                               threads=1, num_attemps=5, optimise_as_logs=None, formatter=lambda _: _):
+                               threads=1, num_attemps=3, optimise_as_logs=None, formatter=lambda _: _):
     """
     Optimizes the likelihood parameters for a given forest and a given MTBD model.
 

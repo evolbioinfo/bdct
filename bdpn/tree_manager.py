@@ -7,6 +7,8 @@ import numpy as np
 from Bio import Phylo
 from ete3 import Tree, TreeNode
 
+EPSILON = 1e-6
+
 TIME = 'time'
 
 DATE_REGEX = r'[+-]*[\d]+[.\d]*(?:[e][+-][\d]+){0,1}'
@@ -122,8 +124,10 @@ def rescale_forest(forest, T_target=1000, T=None):
     annotate_forest_with_time(forest)
     T_initial = get_T(T=T, forest=forest)
 
-    if T_initial != T_target:
-        scaling_factor = T_target / T_initial
+    if T_initial == T_target:
+        return 1
+
+    scaling_factor = T_target / T_initial
 
     for tree in forest:
         for n in tree.traverse():
@@ -131,8 +135,6 @@ def rescale_forest(forest, T_target=1000, T=None):
             n.dist *= scaling_factor
 
     return scaling_factor
-
-
 
 
 def read_forest(tree_path):
@@ -153,6 +155,7 @@ def annotate_tree(tree):
     for n in tree.traverse('preorder'):
         p_time = 0 if n.is_root() else getattr(n.up, TIME)
         n.add_feature(TIME, p_time + n.dist)
+    return tree
 
 
 def annotate_forest_with_time(forest):
@@ -182,14 +185,14 @@ def sort_tree(tree):
         if n.is_leaf():
             n.add_feature(ot_feature, getattr(n, TIME))
             continue
-        c1, c2 = n.children
-        t1, t2 = getattr(c1, ot_feature), getattr(c2, ot_feature)
-        if t1 > t2:
-            n.children = [c2, c1]
-        delattr(c1, ot_feature)
-        delattr(c2, ot_feature)
+        n.children = sorted(n.children, key=lambda _: getattr(_, ot_feature))
+        min_t = np.inf
+        for c in n.children:
+            min_t = min(min_t, getattr(c, ot_feature))
+            delattr(c, ot_feature)
         if not n.is_root():
-            n.add_feature(ot_feature, min(t1, t2))
+            n.add_feature(ot_feature, min_t)
+    return tree
 
 
 def get_total_num_notifiers(tree):
@@ -226,3 +229,36 @@ def preannotate_notifiers(forest):
             notifiers = getattr(node, NOTIFIERS)
             for child in node.children:
                 child.add_feature(NOTIFIERS, getattr(child, NOTIFIERS, set()) | notifiers)
+
+
+def tree2vector(tree, distance_formatter=lambda _: _):
+    sort_tree(tree)
+    result = []
+    for child in reversed(tree.children):
+        result.extend(tree2vector(child, distance_formatter))
+    result.append((distance_formatter(getattr(tree, TIME) - tree.dist), distance_formatter(getattr(tree, TIME))))
+    return result
+
+
+def vector2tree(vector, tree=None, distance_formatter=lambda _: _):
+    if not vector:
+        return tree
+    tp, ti = [distance_formatter(_) for _ in vector.pop()]
+    node = TreeNode(dist=ti - tp)
+    node.add_feature(TIME, ti)
+
+    # If there happens to be a zero branch let's rather put it as tip than as a parent
+    if not tree or ti > tp or np.abs(getattr(tree, TIME) - tp) > EPSILON:
+        while vector and np.abs(distance_formatter(vector[-1][0]) - ti) < EPSILON:
+            node = vector2tree(vector, node, distance_formatter)
+
+    if not tree:
+        tree = node
+    elif np.abs(getattr(tree, TIME) - tp) < EPSILON:
+        tree.add_child(node)
+    elif np.abs(getattr(tree, TIME) - tree.dist - ti) < EPSILON:
+        node.add_child(tree)
+        tree = node
+
+    return tree
+

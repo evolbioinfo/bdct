@@ -5,8 +5,8 @@ import pandas as pd
 
 from bdpn import bd_model
 from bdpn.formulas import log_subtraction, log_sum, get_c1, get_E, get_c2
-from bdpn.parameter_estimator import optimize_likelihood_params, estimate_cis, rescale_log
-from bdpn.tree_manager import TIME, read_forest, annotate_forest_with_time, get_T, resolve_forest, rescale_forest
+from bdpn.parameter_estimator import optimize_likelihood_params, estimate_cis
+from bdpn.tree_manager import TIME, read_forest, annotate_forest_with_time, get_T, rescale_forest
 
 LOG_SCALING_FACTOR_P = 5
 SCALING_FACTOR_P = np.exp(LOG_SCALING_FACTOR_P)
@@ -28,32 +28,48 @@ EPSILON = 1e-10
 N_INTERVALS = 1000
 
 
-def get_tt(T):
-    # dt = T / N_INTERVALS
-    # tt = np.arange(0, N_INTERVALS + 1) * dt
-    # return tt, dt
+def get_tt_fun_log(T):
     logT = np.log(T + 1)
     logdt = logT / N_INTERVALS
     tt = np.maximum((T - (np.exp(np.arange(0, N_INTERVALS + 1) * logdt) - 1))[::-1], 0)
-    return tt, logdt
+
+    def get_index_t_log(t):
+        if t <= 0:
+            return 0
+        if t >= T:
+            return len(tt) - 1
+        return len(tt) - 1 - int(np.log(T + 1 - t) // logdt)
+
+    return tt, get_index_t_log
 
 
-def get_index_t(t, tt, logdt, T):
-    if t <= 0:
-        return 0
-    if t >= T:
-        return len(tt) - 1
-    # return int(T // logdt)
-    return len(tt) - 1 - int(np.log(T + 1 - t) // logdt)
+def get_tt_fun(T):
+    dt = T / N_INTERVALS
+    tt = np.arange(0, N_INTERVALS + 1) * dt
+
+    def get_index_t(t):
+        if t <= 0:
+            return 0
+        if t >= T:
+            return len(tt) - 1
+        return int(t // dt)
+
+    return tt, get_index_t
 
 
-def precalc_u(T, tt, la, psi, rho, r):
+def get_u_function(T, la, psi, rho, r, as_log=True):
+    if as_log:
+        tt, t2index = get_tt_fun_log(T)
+    else:
+        tt, t2index = get_tt_fun(T)
+
     c1 = get_c1(la, psi, rho)
     c2 = get_c2(la, psi, c1)
-    Us = [1]
     psi_not_rho = psi * (1 - rho)
     la_plus_psi = la + psi
     extra_recipients = r - 1
+
+    Us = [1]
     prev_t = T
 
     # limit = (la + psi - c1) / (2 * la)
@@ -70,14 +86,11 @@ def precalc_u(T, tt, la, psi, rho, r):
         U = Us[-1] - dt * dU
         # Us.append(max(min(U, Us[-1]), 0))
         Us.append(max(min(U, Us[-1], bd_model.get_u(la, psi, c1, get_E(c1, c2, t, T))), 0))
-    return np.array(Us)[::-1]
+
+    return np.array(Us)[::-1], tt, t2index
 
 
-def get_u(t, tt, logdt, T, Us):
-    return Us[get_index_t(t, tt, logdt, T)]
-
-
-def get_log_p(t, ti, tt, logdt, T, la, psi, r, Us):
+def get_log_p(t, ti, la, psi, r, Us, t2index):
     la_plus_psi = la + psi
     extra_recipients = r - 1
     if ti == t:
@@ -87,7 +100,8 @@ def get_log_p(t, ti, tt, logdt, T, la, psi, r, Us):
     t_prev = ti
     P = 1
     while t_prev > t:
-        U = get_u(t_prev, tt, logdt, T, Us)
+        # U = get_u(t_prev, tt, logdt, T, Us)
+        U = Us[t2index(t_prev)]
 
         x = la_plus_psi - la * (2 + extra_recipients * U) * U * np.exp(extra_recipients * (U - 1))
 
@@ -154,26 +168,31 @@ def get_start_parameters(forest_stats, la=None, psi=None, rho=None, r=None):
     return np.array([la_est, psi_est, rho_est, r], dtype=np.float64)
 
 
-def loglikelihood(forest, la, psi, rho, r, T, threads=1, u=-1):
+def loglikelihood(forest, la, psi, rho, r, T, threads=1, u=-1, as_log=True):
 
     log_psi_rho = np.log(psi) + np.log(rho)
     log_la = np.log(la)
     r_minus_one = r - 1
     log2 = np.log(2)
 
-    tt, logdt = get_tt(T)
-
-    Us = precalc_u(T, tt, la, psi, rho, r)
+    Us, tt, t2index = get_u_function(T, la, psi, rho, r, as_log=as_log)
+    # for i in range(10):
+    #     t = T / 10 * i
+    #     index = t2index(t)
+    #     print(t, index, tt[max(index - 1, 0): min(index + 2, len(Us))], Us[max(index - 1, 0): min(index + 2, len(Us))])
+    # print('---------')
 
     hidden_lk = Us[0]
-    u = len(forest) * hidden_lk / (1 - hidden_lk) if u is None or u < 0 else u
-    res = u * np.log(hidden_lk)
+    # u = len(forest) * hidden_lk / (1 - hidden_lk) if u is None or u < 0 else u
+    # res = u * np.log(hidden_lk)
+
+    res = - len(forest) * np.log(1 - hidden_lk)
 
     for tree in forest:
 
         root_ti = getattr(tree, TIME)
         root_t = root_ti - tree.dist
-        res += get_log_p(root_t, root_ti, tt, logdt, T, la, psi, r, Us)
+        res += get_log_p(root_t, root_ti, la, psi, r, Us, t2index)
 
         n = len(tree)
         res += n * log_psi_rho
@@ -184,26 +203,44 @@ def loglikelihood(forest, la, psi, rho, r, T, threads=1, u=-1):
                 t = getattr(n, TIME)
                 for child in n.children:
                     ti = getattr(child, TIME)
-                    log_pi = get_log_p(t, ti, tt, logdt, T, la, psi, r, Us)
+                    log_pi = get_log_p(t, ti, la, psi, r, Us, t2index)
                     res += log_pi
-                U = get_u(t, tt, logdt, T, Us)
+                U = Us[t2index(t)]
                 logU = np.log(U)
                 U_times_r_minus_one = U * r_minus_one
                 log_r_min_1 = np.log(r_minus_one)
                 c = len(n.children)
 
-                if c == 2:
-                    res += np.log(2 + U_times_r_minus_one) + (U - 1) * r_minus_one
-                else:
-                    res -= (c - 2) * logU
-                    series_till_c_minus_3_log = np.ones(c - 2, dtype=np.float64) * (-np.inf)
-                    series_till_c_minus_3_log[0] = -r_minus_one + log2
-                    for k in range(1, c - 2):
-                        series_till_c_minus_3_log[k] = (series_till_c_minus_3_log[-1] + log_r_min_1 - np.log(k)
-                                                        + logU + np.log(k + 2) - np.log(k + 1))
+                res += -r_minus_one + (c - 2) * log_r_min_1
 
-                    res += log_subtraction(np.log(2 + U_times_r_minus_one) + (U - 1) * r_minus_one,
-                                           log_sum(series_till_c_minus_3_log))
+                series = [(c - 1) * c]
+                while series[-1] >= 0:
+                    k = len(series)
+                    next_value = series[-1] * U * (r - 1) / k * ((c + k) / (c + k - 2))
+                    if next_value <= 0:
+                        break
+                    series.append(next_value)
+
+                res += np.log(sum(series))
+
+                # if c == 2:
+                #     res += np.log(2 + U_times_r_minus_one) + (U - 1) * r_minus_one
+                # else:
+                #     res -= (c - 2) * logU
+                #     series_till_c_minus_3_log = np.ones(c - 2, dtype=np.float64) * (-np.inf)
+                #     series_till_c_minus_3_log[0] = -r_minus_one + log2
+                #     for k in range(1, c - 2):
+                #         series_till_c_minus_3_log[k] = (series_till_c_minus_3_log[-1] + log_r_min_1 - np.log(k)
+                #                                         + logU + np.log(k + 2) - np.log(k + 1))
+                #
+                #     log_minuend = np.log(2 + U_times_r_minus_one) + (U - 1) * r_minus_one
+                #     log_subtrahend = log_sum(series_till_c_minus_3_log)
+                #     if log_minuend <= log_subtrahend:
+                #         res += (series_till_c_minus_3_log[-1] + log_r_min_1 - np.log(c - 2)
+                #                 + logU + np.log(c) - np.log(c + 1))
+                #     else:
+                #         res += log_subtraction(np.log(2 + U_times_r_minus_one) + (U - 1) * r_minus_one,
+                #                                log_sum(series_till_c_minus_3_log))
     return res
 
 
@@ -270,12 +307,12 @@ def infer(forest, T, la=None, psi=None, p=None, r=None,
     start_parameters = np.minimum(np.maximum(start_parameters, bounds[:, 0]), bounds[:, 1])
 
     input_params = np.array([la, psi, p, r])
-    print('Starting BD parameters:\t{}'
-          .format(format_parameters(*start_parameters, scaling_factor=scaling_factor, fixed=input_params)))
     print('Lower bounds are set to:\t{}'
           .format(format_parameters(*lower_bounds, scaling_factor=scaling_factor)))
     print('Upper bounds are set to:\t{}'
           .format(format_parameters(*upper_bounds, scaling_factor=scaling_factor)))
+    print('Starting parameters:\t{}'
+          .format(format_parameters(*start_parameters, scaling_factor=scaling_factor, fixed=input_params)))
 
     vs, lk = optimize_likelihood_params(forest, T, input_parameters=input_params,
                                         loglikelihood_function=
