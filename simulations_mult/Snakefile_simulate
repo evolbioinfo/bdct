@@ -7,13 +7,13 @@ import os
 localrules: all
 
 folder = os.path.abspath(config.get("folder", '.'))
-# sim_folder = os.path.abspath(config.get("sf", os.path.join(folder, 'medium')))
-sim_folder = os.path.abspath(config.get("sf", os.path.join(folder, 'small')))
+sim_folder = os.path.abspath(config.get("sf", os.path.join(folder, 'medium')))
+# sim_folder = os.path.abspath(config.get("sf", os.path.join(folder, 'small')))
 n = int(config.get("n", 100))
 REPETITIONS = list(range(n))
 
-# m, M = int(config.get('min', 500)), int(config.get('max', 1000))
-m, M = int(config.get('min', 50)), int(config.get('max', 100))
+m, M = int(config.get('min', 500)), int(config.get('max', 1000))
+# m, M = int(config.get('min', 50)), int(config.get('max', 100))
 
 rule all:
     input:

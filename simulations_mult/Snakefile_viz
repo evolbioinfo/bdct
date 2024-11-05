@@ -21,12 +21,12 @@ rule all:
     input:
         # expand(os.path.join(sim_folder,'errors_{par}.svg'), par=pars),
         expand(os.path.join(sim_folder, 'BDMULT', 'errors_{par}.svg'), par=pars),
-        expand(os.path.join(sim_folder, 'BD', 'errors_{par}.svg'), par=pars),
         expand(os.path.join(sim_folder,'BDMULT','likelihood_stats_bdmult.{par}.txt'), par=pars),
-        expand(os.path.join(sim_folder, '{model}', 'CI_stats.txt'), model=['BDMULT']),
+        expand(os.path.join(sim_folder, 'BDMULT', 'CI_stats.txt')),
+        expand(os.path.join(sim_folder, 'BD', 'errors_{par}.svg'), par=pars),
         expand(os.path.join(sim_folder, 'BD','likelihood_stats_bd.{par}.txt'), par=pars),
         expand(os.path.join(sim_folder, 'BD','likelihood_stats_bdmult.{par}.txt'), par=pars),
-        expand(os.path.join(sim_folder, '{model}', 'CI_stats.txt'), model=['BD']),
+        expand(os.path.join(sim_folder, 'BD', 'CI_stats.txt')),
 
 rule likelihood_bdmult:
     '''
@@ -58,10 +58,10 @@ rule likelihood_real_bdmult:
     Calculate likelihood value for real parameters.
     '''
     input:
-        log = os.path.join(sim_folder, '{model}', 'tree.{i}.log'),
-        nwk = os.path.join(sim_folder, '{model}', 'tree.{i}.nwk'),
+        log = os.path.join(sim_folder, 'BDMULT', 'tree.{i}.log'),
+        nwk = os.path.join(sim_folder, 'BDMULT', 'tree.{i}.nwk'),
     output:
-        lk = os.path.join(sim_folder, '{model,BDMULT}', 'tree.{i}.lk_real'),
+        lk = os.path.join(sim_folder, 'BDMULT', 'tree.{i}.lk_real'),
     params:
         mem = 2000,
         name = 'lk_{i}_bdmult_real',
@@ -103,7 +103,7 @@ rule likelihood_real_bd:
         psi=`echo "print(1/${{it}})" | python3`
         la=`echo "print($R*${{psi}})" | python3`
         
-        bd_loglikelihood --nwk {input.nwk} --la ${{la}} --psi ${{psi}} --p $p  > {output.lk}
+        bdmult_loglikelihood --nwk {input.nwk} --la ${{la}} --psi ${{psi}} --p $p --r 1 > {output.lk}
         """
 
 
@@ -130,7 +130,7 @@ rule likelihood_bd:
         psi=`echo "print(1/${{it}})" | python3`
         la=`echo "print($R*${{psi}})" | python3`
 
-        bd_loglikelihood --nwk {input.nwk} --la ${{la}} --psi ${{psi}} --p $p > {output.lk}
+        bdmult_loglikelihood --nwk {input.nwk} --la ${{la}} --psi ${{psi}} --p $p --r 1 > {output.lk}
         """
 
 rule likelihood_stats:
