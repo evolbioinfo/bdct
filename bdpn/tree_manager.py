@@ -7,6 +7,8 @@ import numpy as np
 from Bio import Phylo
 from ete3 import Tree, TreeNode
 
+OLDEST_TIP_TIME = 'oldest_tip_time'
+
 EPSILON = 1e-6
 
 TIME = 'time'
@@ -144,24 +146,38 @@ def read_forest(tree_path):
             return roots
     except:
         pass
-    with open(tree_path, 'r') as f:
-        nwks = f.read().replace('\n', '').split(';')
+    if os.path.exists(tree_path):
+        with open(tree_path, 'r') as f:
+            nwks = f.read().replace('\n', '').split(';')
+    else:
+        try:
+            nwks = tree_path.replace('\n', '').split(';')
+        except:
+            pass
     if not nwks:
         raise ValueError('Could not find any trees (in newick or nexus format) in the file {}.'.format(tree_path))
     return [read_tree(nwk + ';') for nwk in nwks[:-1]]
 
 
-def annotate_tree(tree):
+def annotate_tree_with_time(tree, start_time=0):
     for n in tree.traverse('preorder'):
-        p_time = 0 if n.is_root() else getattr(n.up, TIME)
+        p_time = start_time if n.is_root() else getattr(n.up, TIME)
         n.add_feature(TIME, p_time + n.dist)
     return tree
 
 
-def annotate_forest_with_time(forest):
-    for tree in forest:
+def annotate_forest_with_time(forest, start_times=None):
+    if start_times:
+        if len(start_times) < len(forest):
+            raise ValueError(f'{len(start_times)} start times are specified but the forest contains {len(forest)} trees. '
+                             f'Either specify as many start times as forest trees or set start times to None '
+                             f'(to put all the tree start times at 0)')
+    else:
+        start_times = [0] * len(forest)
+
+    for tree, start_time in zip(forest, start_times):
         if not hasattr(tree, TIME):
-            annotate_tree(tree)
+            annotate_tree_with_time(tree, start_time)
 
 
 def get_T(T, forest):
@@ -172,27 +188,48 @@ def get_T(T, forest):
     return T
 
 
-def sort_tree(tree):
+def sort_tree(tree, add_root_feature=False, oldest_tip_time_feature=OLDEST_TIP_TIME):
     """
-    Reorganise the tree in such a way that the oldest tip (with the minimal time) is always on the left.
+    Reorganise a tree in such a way that for each node its child subtrees are sorted by the time of sampling:
+    the subtree containing the oldest tip (with the oldest sampling time) is the first.
     The tree must be time-annotated.
 
-    :param tree:
-    :return:
+    :param tree: input tree as a ete3 object, with TIME annotations
+    :param add_root_feature: if True, the root will get annotated with the time of its oldest sampled tip
+    :param oldest_tip_time_feature: feature name to store the root's oldest tip's sampling time
+    :return: modified tree (it modifies the input tree object and returns it)
     """
     for n in tree.traverse('postorder'):
-        ot_feature = 'oldest_tip'
         if n.is_leaf():
-            n.add_feature(ot_feature, getattr(n, TIME))
+            n.add_feature(oldest_tip_time_feature, getattr(n, TIME))
             continue
-        n.children = sorted(n.children, key=lambda _: getattr(_, ot_feature))
+        n.children = sorted(n.children, key=lambda _: getattr(_, oldest_tip_time_feature))
         min_t = np.inf
         for c in n.children:
-            min_t = min(min_t, getattr(c, ot_feature))
-            delattr(c, ot_feature)
-        if not n.is_root():
-            n.add_feature(ot_feature, min_t)
+            min_t = min(min_t, getattr(c, oldest_tip_time_feature))
+            delattr(c, oldest_tip_time_feature)
+        if not n.is_root() or add_root_feature:
+            n.add_feature(oldest_tip_time_feature, min_t)
     return tree
+
+
+def sort_forest(forest, oldest_tip_time_feature=OLDEST_TIP_TIME):
+    """
+    Reorganises each tree in the forest in such a way that for each node
+    its child subtrees are sorted by the time of sampling:
+    the subtree containing the oldest tip (with the oldest sampling time) is the first.
+    Then sorts the forest by the time of sampling:
+    the tree containing the oldest tip (with the oldest sampling time) is the first.
+    The forest must be time-annotated.
+
+    :param forest: list of input trees as ete3 objects, with TIME annotations
+    :param oldest_tip_time_feature: feature name to store the root's oldest tip's sampling time
+    :return: list of sorted trees
+    """
+
+    for tree in forest:
+        sort_tree(tree, add_root_feature=True, oldest_tip_time_feature=oldest_tip_time_feature)
+    return sorted(forest, key=lambda _: getattr(_, oldest_tip_time_feature))
 
 
 def get_total_num_notifiers(tree):
@@ -207,7 +244,6 @@ def get_max_num_notifiers(tree):
 def get_min_num_notifiers(tree):
     n = len(tree)
     return n
-
 
 
 def preannotate_notifiers(forest):
@@ -231,34 +267,68 @@ def preannotate_notifiers(forest):
                 child.add_feature(NOTIFIERS, getattr(child, NOTIFIERS, set()) | notifiers)
 
 
-def tree2vector(tree, distance_formatter=lambda _: _):
-    sort_tree(tree)
-    result = []
-    for child in reversed(tree.children):
-        result.extend(tree2vector(child, distance_formatter))
-    result.append((distance_formatter(getattr(tree, TIME) - tree.dist), distance_formatter(getattr(tree, TIME))))
+def tree2vector(tree, sort=True):
+    if sort:
+        sort_tree(tree)
+
+    def node2vec(node):
+        result = []
+        for child in node.children:
+            result.extend(node2vec(child))
+        result.append((getattr(node, TIME) - node.dist, getattr(node, TIME)))
+        return result
+
+    result = node2vec(tree)
+    if tree.dist >= EPSILON:
+        start_time = getattr(tree, TIME) - tree.dist
+        result.append((start_time, start_time))
+
     return result
 
 
-def vector2tree(vector, tree=None, distance_formatter=lambda _: _):
-    if not vector:
+def forest2vector(forest):
+    forest = sort_forest(forest)
+    result = []
+    for tree in forest:
+        result.extend(tree2vector(tree, sort=False))
+    return result
+
+
+def vector2forest(vector):
+    result = []
+    while vector:
+        result.append(vector2tree(vector))
+    return list(reversed(result))
+
+
+def vector2tree(vector):
+
+    def vec2tree(vec, tree=None):
+        if not vec:
+            return tree
+        tp, ti = vec.pop()
+        node = TreeNode(dist=ti - tp)
+        node.add_feature(TIME, ti)
+
+        if not tree or ti > tp or np.abs(getattr(tree, TIME) - tp) > EPSILON:
+            # A zero-length branch means it is a root of the next tree
+            while vec and np.abs(vec[-1][0] - ti) < EPSILON <= np.abs(vec[-1][0] - vec[-1][1]):
+                node = vec2tree(vec, node)
+
+        if not tree:
+            tree = node
+        elif np.abs(getattr(tree, TIME) - tp) < EPSILON:
+            tree.add_child(node)
+        elif np.abs(getattr(tree, TIME) - tree.dist - ti) < EPSILON:
+            node.add_child(tree)
+            tree = node
+
         return tree
-    tp, ti = [distance_formatter(_) for _ in vector.pop()]
-    node = TreeNode(dist=ti - tp)
-    node.add_feature(TIME, ti)
 
-    # If there happens to be a zero branch let's rather put it as tip than as a parent
-    if not tree or ti > tp or np.abs(getattr(tree, TIME) - tp) > EPSILON:
-        while vector and np.abs(distance_formatter(vector[-1][0]) - ti) < EPSILON:
-            node = vector2tree(vector, node, distance_formatter)
-
-    if not tree:
-        tree = node
-    elif np.abs(getattr(tree, TIME) - tp) < EPSILON:
-        tree.add_child(node)
-    elif np.abs(getattr(tree, TIME) - tree.dist - ti) < EPSILON:
-        node.add_child(tree)
-        tree = node
-
+    tree = vec2tree(vector)
+    for n in tree.traverse('postorder'):
+        n.children = list(reversed(n.children))
+    if len(tree.children) == 1 and tree.dist < EPSILON:
+        tree = tree.children[0].detach()
     return tree
 
