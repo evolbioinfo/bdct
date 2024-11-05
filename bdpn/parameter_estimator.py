@@ -2,6 +2,8 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.stats import chi2
 
+MAX_ATTEMPTS = 25
+
 LIKELIHOOD_DIFF_95_CI = chi2.ppf(q=0.95, df=1) / 2
 
 MIN_VALUE = np.log(np.finfo(np.float64).eps)
@@ -71,36 +73,47 @@ def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_functi
         ps_real = get_real_params_from_optimised(ps)
         res = loglikelihood_function(forest, *ps_real, T=T, threads=threads)
         # if np.any(np.isnan(ps)) or np.isnan(res) or res == -np.inf:
-        #     print("{}\t-->\t{:.10f}".format(formatter(ps_real), res))
+        # print(f"{formatter(ps_real)}\t-->\t{res:.10f}")
         return -res
 
     x0 = get_optimised_params_from_real(start_parameters)
     best_log_lh = -get_v(x0)
 
-    for i in range(num_attemps):
+    all_failed = True
+
+    for i in range(max(num_attemps, MAX_ATTEMPTS)):
         if i == 0:
             vs = x0
         else:
             vs = np.random.uniform(optimised_bounds[:, 0], optimised_bounds[:, 1])
-            print('Starting parameters: {}'.format(formatter(get_real_params_from_optimised(vs))))
+            if num_attemps > 1:
+                print(f'Starting parameters: {formatter(get_real_params_from_optimised(vs))}')
 
         fres = minimize(get_v, x0=vs, method='L-BFGS-B', bounds=optimised_bounds)
         if fres.success and not np.any(np.isnan(fres.x)):
+            all_failed = False
             if -fres.fun >= best_log_lh:
                 x0 = np.array(fres.x)
                 best_log_lh = -fres.fun
                 # break
             if num_attemps > 1:
-                print('Attempt {} of trying to optimise the parameters: {} -> {}.'
-                      .format(i + 1, formatter(get_real_params_from_optimised(fres.x)), -fres.fun))
+                print(f'Attempt {i + 1} of trying to optimise the parameters:\t'
+                      f'{formatter(get_real_params_from_optimised(fres.x))}\t->\t{-fres.fun}.')
         elif num_attemps > 1:
-            print('Attempt {} of trying to optimise the parameters failed.'.format(i + 1))
+            print(f'Attempt {i + 1} of trying to optimise the parameters failed, due to {fres.message}.')
+        if not all_failed and i >= num_attemps - 1:
+            break
+    if all_failed:
+        raise ValueError(f'Could not optimise the parameter values for this data, '
+                         f'even after {max(num_attemps, MAX_ATTEMPTS)} attempts!')
+
     optimised_parameters = get_real_params_from_optimised(x0)
 
     return optimised_parameters, best_log_lh
 
 
-def estimate_cis(T, forest, input_parameters, loglikelihood_function, optimised_parameters, bounds, threads=1):
+def estimate_cis(T, forest, input_parameters, loglikelihood_function, optimised_parameters, bounds, threads=1,
+                 optimise_as_logs=None):
     print('Estimating CIs...')
     optimised_cis = np.array(bounds)
     fixed_parameter_mask = input_parameters != None
@@ -136,7 +149,8 @@ def estimate_cis(T, forest, input_parameters, loglikelihood_function, optimised_
             ip[i] = v
             return optimize_likelihood_params(forest, T, ip, loglikelihood_function,
                                               bounds=optimised_cis, start_parameters=rps,
-                                              threads=threads, num_attemps=1)[-1]
+                                              threads=threads, num_attemps=1,
+                                              optimise_as_logs=optimise_as_logs)[-1]
 
         optimised_cis[i, 0] = binary_search(optimised_cis[i, 0], optimised_value, get_lk, True)
         optimised_cis[i, 1] = binary_search(optimised_value, optimised_cis[i, 1], get_lk, False)
