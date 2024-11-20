@@ -2,9 +2,9 @@ import os
 
 import numpy as np
 
-from bdpn.formulas import get_c1, get_c2, get_E, get_log_p, get_u
+from bdpn.formulas import get_c1, get_c2, get_E, get_log_p, get_u, log_factorial
 from bdpn.parameter_estimator import optimize_likelihood_params, estimate_cis
-from bdpn.tree_manager import TIME, read_forest, annotate_forest_with_time, get_T, resolve_forest
+from bdpn.tree_manager import TIME, read_forest, annotate_forest_with_time, get_T
 
 DEFAULT_MIN_PROB = 1e-6
 DEFAULT_MAX_PROB = 1
@@ -53,23 +53,26 @@ def loglikelihood(forest, la, psi, rho, T, threads=1, u=-1):
     c2 = get_c2(la=la, psi=psi, c1=c1)
 
     log_psi_rho = np.log(psi) + np.log(rho)
-    log_two_la = np.log(2) + np.log(la)
+    log_la = np.log(la)
 
     hidden_lk = get_u(la, psi, c1, E_t=get_E(c1=c1, c2=c2, t=0, T=T))
-    u = len(forest) * hidden_lk / (1 - hidden_lk) if u is None or u < 0 else u
-    res = u * np.log(hidden_lk)
+    if hidden_lk:
+        u = len(forest) * hidden_lk / (1 - hidden_lk) if u is None or u < 0 else u
+        res = u * np.log(hidden_lk)
+    else:
+        res = 0
     for tree in forest:
         n = len(tree)
-        res += n * log_psi_rho + (n - 1) * log_two_la
+        res += n * log_psi_rho
         for n in tree.traverse('preorder'):
             if not n.is_leaf():
                 t = getattr(n, TIME)
                 E_t = get_E(c1=c1, c2=c2, t=t, T=T)
-                child1, child2 = n.children
-                ti_1 = getattr(child1, TIME)
-                ti_2 = getattr(child2, TIME)
-                res += get_log_p(c1, t, ti=ti_1, E_t=E_t, E_ti=get_E(c1, c2, ti_1, T)) \
-                       + get_log_p(c1, t, ti=ti_2, E_t=E_t, E_ti=get_E(c1, c2, ti_2, T))
+                num_children = len(n.children)
+                res += log_factorial(num_children) + (num_children - 1) * log_la
+                for child in n.children:
+                    ti = getattr(child, TIME)
+                    res += get_log_p(c1, t, ti=ti, E_t=E_t, E_ti=get_E(c1, c2, ti, T))
         root_ti = getattr(tree, TIME)
         root_t = root_ti - tree.dist
         res += get_log_p(c1, root_t, ti=root_ti, E_t=get_E(c1, c2, root_t, T), E_ti=get_E(c1, c2, root_ti, T))
@@ -170,7 +173,7 @@ def main():
         raise ValueError('At least one of the model parameters needs to be specified for identifiability')
 
     forest = read_forest(params.nwk)
-    resolve_forest(forest)
+    # resolve_forest(forest)
     annotate_forest_with_time(forest)
     T = get_T(T=None, forest=forest)
     print('Read a forest of {} trees with {} tips in total, evolving over time {}'
@@ -198,7 +201,7 @@ def loglikelihood_main():
     params = parser.parse_args()
 
     forest = read_forest(params.nwk)
-    resolve_forest(forest)
+    # resolve_forest(forest)
     annotate_forest_with_time(forest)
     T = get_T(T=None, forest=forest)
     lk = loglikelihood(forest, la=params.la, psi=params.psi, rho=params.p, T=T)
