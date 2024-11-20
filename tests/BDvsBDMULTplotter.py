@@ -12,7 +12,7 @@ from bdpn import bd_model, bdmult_model
 from treesimulator.mtbd_models import BirthDeathModel
 from treesimulator.generator import simulate_tree_gillespie
 
-from bdpn.tree_manager import annotate_forest_with_time, tree2vector, vector2tree, annotate_tree, rescale_forest, TIME
+from bdpn.tree_manager import annotate_forest_with_time, tree2vector, vector2tree, annotate_tree_with_time, rescale_forest, TIME
 
 REPETITIONS = 1000000
 
@@ -43,7 +43,7 @@ if __name__ == '__main__':
 
     # for T_initial in (0.001, 0.01, 0.1, 1, 10, 100, 1000):
     for T_initial in (1,):
-        T = 100
+        T = 1000
         scaling_factor = T / T_initial
         la, psi = la_initial / scaling_factor, psi_initial / scaling_factor
         # T, la, psi = T_initial, la_initial, psi_initial
@@ -90,7 +90,7 @@ if __name__ == '__main__':
                     # Us[: int(sampled_dist * scaling_factor / (T/100) + 1)] += 1
                     Us[: int(sampled_dist / delta_t + 1)] += 1
                     rescale_forest([tree], T_target=T, T=T_initial)
-                    conf2c[tuple(tree2vector(annotate_tree(tree), lambda _: int(_ / delta_t)))] += 1
+                    conf2c[tuple(tree2vector(annotate_tree_with_time(tree), lambda _: int(_ / delta_t)))] += 1
 
             lk_sim, lk_est, n_tips, n_tips_real = [], [], [], []
             for conf, count in conf2c.items():
