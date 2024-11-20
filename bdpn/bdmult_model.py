@@ -11,10 +11,10 @@ LOG_SCALING_FACTOR_P = 5
 SCALING_FACTOR_P = np.exp(LOG_SCALING_FACTOR_P)
 
 DEFAULT_MIN_PROB = 1e-6
-DEFAULT_MAX_PROB = 1
+DEFAULT_MAX_PROB = 1 - 1e-6
 DEFAULT_MIN_RATE = 1e-3
 DEFAULT_MAX_RATE = 1e2
-DEFAULT_MAX_PARTNERS = 1e2
+DEFAULT_MAX_PARTNERS = 500
 
 DEFAULT_LOWER_BOUNDS = [DEFAULT_MIN_RATE, DEFAULT_MIN_RATE, DEFAULT_MIN_PROB, 1]
 DEFAULT_UPPER_BOUNDS = [DEFAULT_MAX_RATE, DEFAULT_MAX_RATE, DEFAULT_MAX_PROB, DEFAULT_MAX_PARTNERS]
@@ -22,9 +22,9 @@ DEFAULT_UPPER_BOUNDS = [DEFAULT_MAX_RATE, DEFAULT_MAX_RATE, DEFAULT_MAX_PROB, DE
 PARAMETER_NAMES = np.array(['la', 'psi', 'rho', 'r'])
 EPI_PARAMETER_NAMES = np.array(['R0', 'd'])
 
-EPSILON = 1e-10
+EPSILON = 1e-6
 
-N_INTERVALS = 1000
+N_INTERVALS = 10000
 
 
 def get_tt_fun_log(T):
@@ -100,13 +100,14 @@ def get_log_p(t, ti, la, psi, r, Us, t2index):
     P = 1
     while t_prev > t:
         # U = get_u(t_prev, tt, logdt, T, Us)
+        # TODO: use linear approximation instead for U value
         U = Us[t2index(t_prev)]
 
         x = la_plus_psi - la * (2 + extra_recipients * U) * U * np.exp(extra_recipients * (U - 1))
 
         # if we can approximate U with a constant from now, we have a formula
         if U == Us[0]:
-            return np.log(P) + x * (t - t_prev)
+            return np.log(P) + x * (t - t_prev) - factors
             # return log_subtraction(np.log(P), log_subtraction(x * t_prev, x * t)) - factors
 
         if P < 1e-3:
@@ -282,19 +283,17 @@ def infer(forest, T, la=None, psi=None, p=None, r=None,
     bounds[:, 0] = lower_bounds
     bounds[:, 1] = upper_bounds
 
-    if start_parameters is None:
-        start_parameters = get_start_parameters(forest_stats, la, psi, p, r)
-    start_parameters = np.minimum(np.maximum(start_parameters, bounds[:, 0]), bounds[:, 1])
     input_params = np.array([la, psi, p, r])
 
-    # If the tree is compatible with BD, start from BD-optimised parameters instead
-    if start_parameters[-1] == 1:
+    if start_parameters is None:
+        # start_parameters = get_start_parameters(forest_stats, la, psi, p, r)
         vs, _ = optimize_likelihood_params(forest, T, input_parameters=np.array(input_params[:-1]),
                                            loglikelihood_function=bd_model.loglikelihood,
                                            bounds=np.array(bounds[:-1, :]),
-                                           start_parameters=np.array(start_parameters[:-1]),
+                                           start_parameters=bd_model.get_start_parameters(forest, la, psi, p),
                                            num_attemps=1)
-        start_parameters[:-1] = vs
+        start_parameters = np.concatenate([vs, [r if r is not None and r >= 1 else (forest_stats[1] - 1)]])
+    start_parameters = np.minimum(np.maximum(start_parameters, bounds[:, 0]), bounds[:, 1])
 
     print('Lower bounds are set to:\t{}'
           .format(format_parameters(*lower_bounds, scaling_factor=scaling_factor)))
@@ -377,7 +376,7 @@ def main():
     T_initial = get_T(T=None, forest=forest)
     print(f'Read a forest of {len(forest)} trees with {sum(len(_) for _ in forest)} tips in total, '
           f'evolving over time {T_initial}')
-    T = 1000
+    T = 10000
     scaling_factor = rescale_forest(forest, T_target=T, T=T_initial)
 
     vs, cis = infer(forest, T, **vars(params), scaling_factor=scaling_factor)
