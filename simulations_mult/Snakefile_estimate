@@ -26,6 +26,8 @@ rule all:
         #     model=['BD'], estimator=['bdmult']),
         expand(os.path.join(sim_folder, '{model}', 'tree.{i}.{p}.est_{estimator}'), i=REPETITIONS, p=['p'],
             model=['BDMULT', 'BD'], estimator=['bd', 'bdmult']),
+        expand(os.path.join(sim_folder, '{model}', 'tree.{i}.{p}.est_{estimator}'), i=REPETITIONS, p=['p'],
+            model=['BDSSMULT'], estimator=['bdssmult']),
     shell:
         """
         snakemake --snakefile Snakefile_viz --keep-going --cores 2 --config n={n} sf={sim_folder} --unlock 2> /dev/null
@@ -59,6 +61,29 @@ rule estimate_params_p_fixed:
         cat {input.log}
 
         bdmult_infer --p $p --nwk {input.nwk} --log {output.est} --threads {threads} {ci}
+        """
+
+rule estimate_params_p_fixed_bdssmult:
+    '''
+    Estimate parameters.
+    '''
+    input:
+        nwk = os.path.join(sim_folder, '{model}', 'tree.{i}.nwk'),
+        log = os.path.join(sim_folder, '{model}', 'tree.{i}.log'),
+    output:
+        est = os.path.join(sim_folder, '{model}', 'tree.{i}.p.est_bdssmult'),
+    params:
+        mem = 2000,
+        name = 'est_p_{i}',
+        qos = 'normal'
+    threads: 2
+    # singularity: "docker://evolbioinfo/bdpn:v0.1.14"
+    shell:
+        """
+        p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
+        cat {input.log}
+
+        bdssmult_infer --p $p --nwk {input.nwk} --log {output.est} --threads {threads} {ci}
         """
 
 

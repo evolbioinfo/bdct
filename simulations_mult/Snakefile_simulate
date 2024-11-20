@@ -17,7 +17,7 @@ m, M = int(config.get('min', 500)), int(config.get('max', 1000))
 
 rule all:
     input:
-        expand(os.path.join(sim_folder, '{model}', 'tree.{i}.nwk'), i=REPETITIONS, model=['BDMULT', 'BD'])
+        expand(os.path.join(sim_folder, '{model}', 'tree.{i}.nwk'), i=REPETITIONS, model=['BDMULT', 'BD', 'BDSSMULT'])
     shell:
         """
         snakemake --snakefile Snakefile_estimate --keep-going --cores 12 --config n={n} sf={sim_folder} --unlock 2> /dev/null
@@ -74,5 +74,34 @@ rule simulate_bd:
         while [ ! -f {output.nwk} ]
         do
             timeout 10m generate_bd --min_tips {m} --max_tips {M} --la $la --psi $psi --p $p --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
+        done
+        """
+
+
+rule simulate_bdss_mult:
+    '''
+    Simulate a BDSS-MULT tree for the same parameters as the corresponding BD-MULT tree.
+    '''
+    input:
+        log=os.path.join(sim_folder, 'BDMULT', 'tree.{i}.log'),
+    output:
+        log=os.path.join(sim_folder, 'BDSSMULT', 'tree.{i}.log'),
+        nwk=os.path.join(sim_folder, 'BDSSMULT', 'tree.{i}.nwk')
+    params:
+        mem=2000,
+        name='simulate_{i}',
+        qos='fast'
+    threads: 1
+    # singularity: "docker://evolbioinfo/treesimulator:v0.1.19"
+    shell:
+        """
+        p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
+        la=`tail -n 1 {input.log} | awk -F',' '{{ print $4 }}'`
+        psi=`tail -n 1 {input.log} | awk -F',' '{{ print $5 }}'`
+        cat {input.log}
+
+        while [ ! -f {output.nwk} ]
+        do
+            timeout 60s python3 py/tree_generator_bdssmult.py --min_tips {m} --max_tips {M} --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
         done
         """
