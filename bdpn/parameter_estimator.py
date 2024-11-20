@@ -6,7 +6,7 @@ MAX_ATTEMPTS = 25
 
 LIKELIHOOD_DIFF_95_CI = chi2.ppf(q=0.95, df=1) / 2
 
-MIN_VALUE = np.log(np.finfo(np.float64).eps)
+MIN_VALUE = np.log(np.power(np.finfo(np.float64).eps, 0.5))
 MAX_VALUE = np.log(np.finfo(np.float64).max)
 
 
@@ -17,8 +17,9 @@ def rescale_log(log_array):
     :return: float, factor of e by which the log array has been multiplied.
     """
 
-    max_limit = MAX_VALUE
-    min_limit = MIN_VALUE
+    n_values = sum(log_array.shape)
+    max_limit = MAX_VALUE - n_values - 1
+    min_limit = MIN_VALUE + n_values + 1
 
     non_zero_loglh_array = log_array[log_array > -np.inf]
     if len(non_zero_loglh_array) == 0:
@@ -27,10 +28,10 @@ def rescale_log(log_array):
     max_lh_value = np.max(non_zero_loglh_array)
 
     factors = 0
-    if max_lh_value > max_limit - 2:
-        factors = max_limit - max_lh_value - 2
-    elif min_lh_value < min_limit + 2:
-        factors = min(min_limit - min_lh_value + 2, max_limit - max_lh_value - 2)
+    if max_lh_value > max_limit:
+        factors = max_limit - max_lh_value
+    elif min_lh_value < min_limit:
+        factors = min(min_limit - min_lh_value, max_limit - max_lh_value)
     log_array += factors
     return factors
 
@@ -70,6 +71,8 @@ def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_functi
         return ps
 
     def get_v(ps):
+        if np.any(np.isnan(ps)):
+            return -np.inf
         ps_real = get_real_params_from_optimised(ps)
         res = loglikelihood_function(forest, *ps_real, T=T, threads=threads)
         # if np.any(np.isnan(ps)) or np.isnan(res) or res == -np.inf:
@@ -79,8 +82,7 @@ def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_functi
     x0 = get_optimised_params_from_real(start_parameters)
     best_log_lh = -get_v(x0)
 
-    all_failed = True
-
+    successful_attempts = 0
     for i in range(max(num_attemps, MAX_ATTEMPTS)):
         if i == 0:
             vs = x0
@@ -91,7 +93,7 @@ def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_functi
 
         fres = minimize(get_v, x0=vs, method='L-BFGS-B', bounds=optimised_bounds)
         if fres.success and not np.any(np.isnan(fres.x)):
-            all_failed = False
+            successful_attempts += 1
             if -fres.fun >= best_log_lh:
                 x0 = np.array(fres.x)
                 best_log_lh = -fres.fun
@@ -101,9 +103,9 @@ def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_functi
                       f'{formatter(get_real_params_from_optimised(fres.x))}\t->\t{-fres.fun}.')
         elif num_attemps > 1:
             print(f'Attempt {i + 1} of trying to optimise the parameters failed, due to {fres.message}.')
-        if not all_failed and i >= num_attemps - 1:
+        if successful_attempts >= num_attemps:
             break
-    if all_failed:
+    if not successful_attempts:
         raise ValueError(f'Could not optimise the parameter values for this data, '
                          f'even after {max(num_attemps, MAX_ATTEMPTS)} attempts!')
 
