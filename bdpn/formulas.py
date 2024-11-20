@@ -2,6 +2,14 @@ import numpy as np
 
 from bdpn.parameter_estimator import rescale_log, MIN_VALUE
 
+N2LOG_FACTORIAL = {0: 0, 1: 0, 2: np.log(2)}
+
+
+def log_factorial(n):
+    if n not in N2LOG_FACTORIAL:
+        N2LOG_FACTORIAL[n] = np.log(n) + log_factorial(n - 1)
+    return N2LOG_FACTORIAL[n]
+
 
 def get_c1(la, psi, rho):
     """
