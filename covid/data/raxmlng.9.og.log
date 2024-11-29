@@ -1,0 +1,130 @@
+
+RAxML-NG v. 1.0.2-master released on 22.02.2021 by The Exelixis Lab.
+Developed by: Alexey M. Kozlov and Alexandros Stamatakis.
+Contributors: Diego Darriba, Tomas Flouri, Benoit Morel, Sarah Lutteropp, Ben Bettisworth.
+Latest version: https://github.com/amkozlov/raxml-ng
+Questions/problems/suggestions? Please visit: https://groups.google.com/forum/#!forum/raxml
+
+System: 12th Gen Intel(R) Core(TM) i9-12900H, 14 cores, 31 GB RAM
+
+RAxML-NG was called at 05-Nov-2024 16:19:32 as follows:
+
+raxml-ng --model data/raxmlng.9.model --msa data/subclusterForRe_9.fasta_og.fasta --seed 239 --threads 4 --force --blmin 1e-10 --precision 16 --tree rand{5} --simd avx2 --tree-constraint data/raxmlng.9.nwk
+
+Analysis options:
+  run mode: ML tree search
+  start tree(s): random (5)
+  topological constraint: data/raxmlng.9.nwk
+  random seed: 239
+  tip-inner: OFF
+  pattern compression: ON
+  per-rate scalers: OFF
+  site repeats: ON
+  fast spr radius: AUTO
+  spr subtree cutoff: 1.000000
+  branch lengths: proportional (ML estimate, algorithm: NR-FAST)
+  SIMD kernels: AVX2
+  parallelization: coarse-grained (auto), PTHREADS (4 threads), thread pinning: OFF
+
+WARNING: Running in FORCE mode: all safety checks are disabled!
+
+[00:00:00] Reading alignment from file: data/subclusterForRe_9.fasta_og.fasta
+[00:00:00] Loaded alignment with 121 taxa and 29903 sites
+
+Alignment comprises 1 partitions and 891 patterns
+
+Partition 0: noname
+Model: GTR{0.001/4.85237/0.001/0.001/8.61247/1}+FU{0.299001/0.182952/0.196382/0.321666}+G4m{0.0201383}
+Alignment sites / patterns: 29903 / 891
+Gaps: 2.20 %
+Invariant sites: 99.29 %
+
+
+NOTE: Binary MSA file created: data/subclusterForRe_9.fasta_og.fasta.raxml.rba
+
+[00:00:00] Loading constraint tree from: data/raxmlng.9.nwk
+[00:00:00] Loaded non-comprehensive constraint tree with 120 taxa
+Parallelization scheme autoconfig: 4 worker(s) x 1 thread(s)
+
+Parallel reduction/worker buffer size: 1 KB  / 0 KB
+
+[00:00:00] Generating 5 random starting tree(s) with 121 taxa
+[00:00:00] Data distribution: max. partitions/sites/weight per thread: 1 / 891 / 14256
+[00:00:00] Data distribution: max. searches per worker: 2
+
+Starting ML tree search with 5 distinct starting trees
+
+[00:00:00 -50708.7293909263171372] Initial branch length optimization
+[00:00:00 -41227.3112549002617016] Model parameter optimization (eps = 10.0000000000000000)
+[00:00:00 -41227.3112548997814883] AUTODETECT spr round 1 (radius: 5)
+[00:00:01 -41227.3112372094183229] SPR radius for FAST iterations: 5 (autodetect)
+[00:00:01 -41227.3112372094183229] Model parameter optimization (eps = 3.0000000000000000)
+[00:00:01 -41227.3112372093455633] FAST spr round 1 (radius: 5)
+[00:00:02 -41227.3112372093455633] Model parameter optimization (eps = 1.0000000000000000)
+[00:00:02 -41227.3112372093455633] SLOW spr round 1 (radius: 5)
+[00:00:04 -41227.3112372093455633] SLOW spr round 2 (radius: 10)
+[00:00:06 -41227.3112312874654890] SLOW spr round 3 (radius: 15)
+[00:00:07 -41227.3112312874654890] SLOW spr round 4 (radius: 20)
+[00:00:08 -41227.3112312874654890] SLOW spr round 5 (radius: 25)
+[00:00:09 -41223.0204630311054643] SLOW spr round 6 (radius: 5)
+[00:00:09] [worker #2] ML tree search #3, logLikelihood: -41220.8491134300929843
+[00:00:10 -41223.0204600303914049] SLOW spr round 7 (radius: 10)
+[00:00:11] [worker #3] ML tree search #4, logLikelihood: -41227.3112327178314445
+[00:00:12 -41223.0204600303914049] SLOW spr round 8 (radius: 15)
+[00:00:13 -41223.0204600303914049] SLOW spr round 9 (radius: 20)
+[00:00:13] [worker #1] ML tree search #2, logLikelihood: -41223.0204611566005042
+[00:00:14 -41223.0204600303914049] SLOW spr round 10 (radius: 25)
+[00:00:14 -41223.0204600303914049] Model parameter optimization (eps = 0.1000000000000000)
+
+[00:00:14] [worker #0] ML tree search #1, logLikelihood: -41223.0204600303914049
+
+[00:00:14 -50704.7081075508103822] Initial branch length optimization
+[00:00:14 -41227.3114704181789421] Model parameter optimization (eps = 10.0000000000000000)
+[00:00:14 -41227.3114699028010364] AUTODETECT spr round 1 (radius: 5)
+[00:00:15 -41227.3114580412220675] SPR radius for FAST iterations: 5 (autodetect)
+[00:00:15 -41227.3114580412220675] Model parameter optimization (eps = 3.0000000000000000)
+[00:00:15 -41227.3114580343099078] FAST spr round 1 (radius: 5)
+[00:00:15 -41227.3114580205365201] Model parameter optimization (eps = 1.0000000000000000)
+[00:00:15 -41227.3114580137407756] SLOW spr round 1 (radius: 5)
+[00:00:17 -41227.3113886431383435] SLOW spr round 2 (radius: 10)
+[00:00:18 -41227.3112493247317616] SLOW spr round 3 (radius: 15)
+[00:00:19 -41227.3112493247317616] SLOW spr round 4 (radius: 20)
+[00:00:20 -41222.9339673162103281] SLOW spr round 5 (radius: 5)
+[00:00:21 -41222.9339673162103281] SLOW spr round 6 (radius: 10)
+[00:00:22 -41222.9339554463294917] SLOW spr round 7 (radius: 15)
+[00:00:23 -41220.8491216099864687] SLOW spr round 8 (radius: 5)
+[00:00:24 -41220.8491156657619285] SLOW spr round 9 (radius: 10)
+[00:00:25 -41220.8491156657619285] SLOW spr round 10 (radius: 15)
+[00:00:26 -41220.8491156657619285] SLOW spr round 11 (radius: 20)
+[00:00:26 -41220.8491156657619285] SLOW spr round 12 (radius: 25)
+[00:00:27 -41220.8491156657619285] Model parameter optimization (eps = 0.1000000000000000)
+
+[00:00:27] [worker #0] ML tree search #5, logLikelihood: -41220.8491156657619285
+
+
+Optimized model parameters:
+
+   Partition 0: noname
+   Rate heterogeneity: GAMMA (4 cats, mean),  alpha: 0.0201382981362978 (user),  weights&rates: (0.2500000000000000,0.0000000000000000) (0.2500000000000000,0.0000000000000013) (0.2500000000000000,0.0000010492230767) (0.2500000000000000,3.9999989507769222) 
+   Base frequencies (user): 0.2990006947472958 0.1829517203397672 0.1963820467451398 0.3216655381677972 
+   Substitution rates (user): 0.0010000000000000 4.8523655147105682 0.0010000000000000 0.0010000000000000 8.6124745751222331 1.0000000000000000 
+
+
+Final LogLikelihood: -41220.8491134300929843
+
+AIC score: 82919.6982268601859687 / AICc score: 82923.5656711510528112 / BIC score: 84904.7638940819015261
+Free parameters (model + branch lengths): 239
+
+WARNING: Best ML tree contains 109 near-zero branches!
+
+Best ML tree with collapsed near-zero branches saved to: /home/azhukova/projects/bdpn/covid/data/subclusterForRe_9.fasta_og.fasta.raxml.bestTreeCollapsed
+Best ML tree saved to: /home/azhukova/projects/bdpn/covid/data/subclusterForRe_9.fasta_og.fasta.raxml.bestTree
+All ML trees saved to: /home/azhukova/projects/bdpn/covid/data/subclusterForRe_9.fasta_og.fasta.raxml.mlTrees
+Optimized model saved to: /home/azhukova/projects/bdpn/covid/data/subclusterForRe_9.fasta_og.fasta.raxml.bestModel
+
+Execution log saved to: /home/azhukova/projects/bdpn/covid/data/subclusterForRe_9.fasta_og.fasta.raxml.log
+
+Analysis started: 05-Nov-2024 16:19:32 / finished: 05-Nov-2024 16:19:59
+
+Elapsed time: 27.642 seconds
+

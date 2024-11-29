@@ -1,0 +1,329 @@
+import os
+
+localrules: all
+
+
+# To run locally:
+# snakemake --snakefile Snakefile_covid_tree --keep-going --cores 4 --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
+
+
+
+# To run on bioevo (change shakemake activation below if you are not Anna ;) :
+# source ~/.bashrc && conda activate snakemake && module load singularity && cd /pasteur/zeus/projets/p01/Evolbioinfo/users/azhukova/projects/covidtree/pipelines/covid
+# snakemake --snakefile Snakefile_covid --config date="20210507" prefix="res_covtree" --keep-going --cores 1 --use-singularity --singularity-prefix $HOME/.singularity --singularity-args "-B /pasteur" --cluster "sbatch -c {threads} -o {folder}/logs/{params.name}.log -e {folder}/logs/{params.name}.log --mem {params.mem} -p {params.partition} --qos={params.qos}  -A bioevo -J {params.name}" --jobs 300
+# snakemake --snakefile Snakefile_covid --config date="20210507" prev_date="20210407" prev_prefix="res_covtree_iterative" --keep-going --cores 1 --use-singularity --singularity-prefix $HOME/.singularity --singularity-args "-B /pasteur" --cluster "sbatch -c {threads} -o {folder}/logs/{params.name}.log -e {folder}/logs/{params.name}.log --mem {params.mem} -p {params.partition} --qos={params.qos}  -A bioevo -J {params.name}" --jobs 300
+# snakemake --snakefile Snakefile_covid --config date="20200607" prev_date="20200507" --keep-going --cores 1 --use-singularity --singularity-prefix $HOME/.singularity --singularity-args "-B /pasteur" --cluster "sbatch -c {threads} -o {folder}/logs/{params.name}.log -e {folder}/logs/{params.name}.log --mem {params.mem} -p {params.partition} --qos={params.qos}  -A bioevo -J {params.name}" --jobs 300
+# snakemake --snakefile Snakefile_covid --config date="20200707" prev_date="20200607" --keep-going --cores 1 --use-singularity --singularity-prefix $HOME/.singularity --singularity-args "-B /pasteur" --cluster "sbatch -c {threads} -o {folder}/logs/{params.name}.log -e {folder}/logs/{params.name}.log --mem {params.mem} -p {params.partition} --qos={params.qos}  -A bioevo -J {params.name}" --jobs 300
+# snakemake --snakefile Snakefile_covid --config date="20210307" --keep-going --cores 1 --use-singularity --singularity-prefix $HOME/.singularity --singularity-args "-B /pasteur" --cluster "sbatch -c {threads} -o {folder}/logs/{params.name}.log -e {folder}/logs/{params.name}.log --mem {params.mem} -p {params.partition} --qos={params.qos}  -A bioevo -J {params.name}" --jobs 300
+# snakemake --snakefile Snakefile_covid --config date="20200907" --keep-going --cores 1 --use-singularity --singularity-prefix $HOME/.singularity --singularity-args "-B /pasteur" --cluster "sbatch -c {threads} -o {folder}/logs/{params.name}.log -e {folder}/logs/{params.name}.log --mem {params.mem} -p {params.partition} --qos={params.qos}  -A bioevo -J {params.name}" --jobs 300
+# snakemake --snakefile Snakefile_covid --config date="20201102" --keep-going --cores 1 --use-singularity --singularity-prefix $HOME/.singularity --singularity-args "-B /pasteur" --cluster "sbatch -c {threads} -o {folder}/logs/{params.name}.log -e {folder}/logs/{params.name}.log --mem {params.mem} -p {params.partition} --qos={params.qos}  -A bioevo -J {params.name}" --jobs 300
+#
+# For iterative run:
+# snakemake --snakefile Snakefile_covid --config date="20200907" prev_date="20200507" --keep-going --cores 1 --use-singularity --singularity-prefix $HOME/.singularity --singularity-args "-B /pasteur" --cluster "sbatch -c {threads} -o {folder}/logs/{params.name}.log -e {folder}/logs/{params.name}.log --mem {params.mem} -p {params.partition} --qos={params.qos}  -A bioevo -J {params.name}" --jobs 300
+# snakemake --snakefile Snakefile_covid --config date="20201007" prev_date="20200907" --keep-going --cores 1 --use-singularity --singularity-prefix $HOME/.singularity --singularity-args "-B /pasteur" --cluster "sbatch -c {threads} -o {folder}/logs/{params.name}.log -e {folder}/logs/{params.name}.log --mem {params.mem} -p {params.partition} --qos={params.qos}  -A bioevo -J {params.name}" --jobs 300
+
+
+MAESTRO_PATH = '/pasteur/zeus/projets/p01/Evolbioinfo/covidtrees/'
+UBUBOOK_PATH = '/home/azhukova/Evolbioinfo/covidtrees/'
+
+
+folder = config.get("folder", 'data')
+
+os.makedirs(os.path.join(folder, 'logs'), exist_ok=True)
+
+
+rule all:
+    input:
+        expand(os.path.join(folder, 'timetree_{n}.est'), n=range(1, 11))
+
+
+rule unxzip:
+    '''
+    Unxzips the alignments.
+    '''
+    input:
+        aln = os.path.join(folder, '{aln}.fa.xz'),
+    output:
+        aln = temp(os.path.join(folder, '{aln}.fa')),
+    params:
+        mem = 120000,
+        name = 'unxz_{aln}',
+        qos = 'fast',
+        partition = 'common,dedicated'
+    threads: 1
+    shell:
+        """
+        xz -dc {input.aln} > {output.aln}
+        """
+
+rule raxmlng:
+    '''
+    Reconstructs a tree with RAxML-NG.
+    '''
+    input:
+        aln = os.path.join(folder, 'subclusterForRe_{n}.fasta'),
+    output:
+        tree = os.path.join(folder, 'raxmlng.{n,\d+}.nwk'),
+        log = os.path.join(folder, 'raxmlng.{n}.log'),
+        model = os.path.join(folder, 'raxmlng.{n}.model'),
+    threads: 4
+    singularity: "docker://evolbioinfo/raxml-ng:v1.0.2"
+    params:
+        mem = 120000,
+        name = 'raxmlng',
+        qos = 'fast',
+        partition = 'common,dedicated',
+    shell:
+        """
+        raxml-ng --model GTR+G4+FO --msa {input.aln} --seed 239 --threads {threads} --force --blmin 1e-10 --precision 16 --tree pars{{5}} --simd avx2
+
+        mv {input.aln}.raxml.bestTreeCollapsed {output.tree}
+        mv {input.aln}.raxml.log {output.log}
+        mv {input.aln}.raxml.bestModel {output.model}
+        rm -rf {input.aln}.raxml*
+        """
+
+
+rule raxmlng_og:
+    '''
+    Places an outgroup into a tree with RAxML-NG.
+    '''
+    input:
+        aln = os.path.join(folder, 'subclusterForRe_{n}.fasta'),
+        og = os.path.join(folder, 'outgroup.fasta'),
+        model = os.path.join(folder, 'raxmlng.{n}.model'),
+        tree = os.path.join(folder, 'raxmlng.{n}.nwk'),
+    output:
+        tree = os.path.join(folder, 'raxmlng.{n}.og.nwk'),
+        log = os.path.join(folder, 'raxmlng.{n}.og.log'),
+    threads: 4
+    singularity: "docker://evolbioinfo/raxml-ng:v1.0.2"
+    params:
+        mem = 120000,
+        name = 'raxmlng',
+        qos = 'fast',
+        partition = 'common,dedicated',
+    shell:
+        """
+        cat {input.og} {input.aln} > {input.aln}_og.fasta
+        
+        raxml-ng --model {input.model} --msa {input.aln}_og.fasta --seed 239 --threads {threads} --force --blmin 1e-10 --precision 16 --tree rand{{5}} --simd avx2 --tree-constraint {input.tree}
+
+        mv {input.aln}_og.fasta.raxml.bestTreeCollapsed {output.tree}
+        mv {input.aln}_og.fasta.raxml.log {output.log}
+        rm -rf {input.aln}_og.fasta.raxml*
+        rm {input.aln}_og.fasta
+        """
+
+
+
+rule root:
+    '''
+    Roots a tree with an outgroup.
+    '''
+    input:
+        tree = os.path.join(folder, 'raxmlng.{n}.og.nwk'),
+        outgroup = os.path.join(folder, 'outgroup.txt'),
+    output:
+        tree = os.path.join(folder, 'rooted_raxmlng.{n}.nwk'),
+    singularity:
+        "docker://evolbioinfo/gotree:v0.4.4"
+    params:
+        mem = 2000,
+        name = 'root_{n}',
+        qos = 'fast'
+    threads: 1
+    shell:
+        """
+        gotree support clear -i {input.tree} | gotree reroot outgroup -l {input.outgroup} -o {output.tree} -r
+        """
+
+rule ids:
+    '''
+    Extracts labels from a tree.
+    '''
+    input:
+        tree = os.path.join(folder, 'raxmlng.{n}.nwk'),
+    output:
+        tab = os.path.join(folder, 'ids.{n}.txt'),
+    singularity:
+        "docker://evolbioinfo/gotree:v0.4.4"
+    params:
+        mem = 2000,
+        name = 'ids_{n}',
+        qos = 'fast'
+    threads: 1
+    shell:
+        """
+        gotree labels -i {input.tree} > {output.tab}
+        """
+
+
+
+rule dates:
+    '''
+    Extracts dates from ids and reformats them for LSD2.
+    '''
+    input:
+        tab = os.path.join(folder, 'ids.{n}.txt'),
+    output:
+        dates = os.path.join(folder, 'dates.{n}.tab'),
+    params:
+        mem = 2000,
+        name = 'dates_{n}',
+        qos = 'fast'
+    threads: 1
+    singularity: "docker://evolbioinfo/python-evol:v3.6richer"
+    shell:
+        """
+        python3 py/parse_dates.py --ids {input.tab} --dates {output.dates}
+        """
+
+
+rule aln_length:
+    '''
+    Calculates alignment length.
+    '''
+    input:
+        aln = os.path.join(folder, '{aln}.fasta'),
+    output:
+        length = os.path.join(folder, '{aln}.length'),
+    singularity:
+        "docker://evolbioinfo/goalign:v0.3.6"
+    params:
+        mem = 2000,
+        name = 'aln_len',
+        qos = 'fast'
+    threads: 1
+    shell:
+        """
+        goalign stats length -i {input.aln} > {output.length}
+        """
+
+
+rule tree_size:
+    '''
+    Calculates tree size.
+    '''
+    input:
+        tree = os.path.join(folder, '{tree}.nwk'),
+    output:
+        length = os.path.join(folder, '{tree}.ntips'),
+    singularity:
+        "docker://evolbioinfo/gotree:v0.4.4"
+    params:
+        mem = 2000,
+        name = 'tree_size',
+        qos = 'fast'
+    threads: 1
+    shell:
+        """
+        gotree stats -i {input.tree} | tail -n 1 | awk '{{print $3}}' > {output.length}
+        """
+
+
+
+rule date_lsd2:
+    '''
+    Dates a tree.
+    '''
+    input:
+        tree = os.path.join(folder, 'raxmlng.{n}.og.nwk'),
+        ntips = os.path.join(folder, 'raxmlng.{n}.ntips'),
+        dates = os.path.join(folder, 'dates.{n}.tab'),
+        og = os.path.join(folder, 'outgroup.txt'),
+        length = os.path.join(folder, 'subclusterForRe_{n}.length'),
+    output:
+        tree = os.path.join(folder, 'timetree_{n}.nexus'),
+        log = os.path.join(folder, 'timetree_{n}.log'),
+        rd = os.path.join(folder, 'timetree_{n}.rootdate'),
+        outliers = os.path.join(folder, 'timetree_{n}.outliers'),
+    threads: 1
+    singularity: "docker://evolbioinfo/lsd2:v2.4.1"
+    params:
+        mem = 500000,
+        name = 'lsd2',
+        wd = os.path.join(folder, 'timetree_{n}.wd_lsd2')
+    shell:
+        """        
+        n=`head {input.length}`
+        t=`head {input.ntips}`
+        m=`awk -v t="$t" 'BEGIN {{ m=int(t * 0.33); print m}}'`
+
+        lsd2 -i {input.tree} -d {input.dates} -e 3 -s $n -o {params.wd} -u e -f 1000 -m $m -g {input.og} -G
+        rm -rf {output.outliers}
+
+        outliers=`cat {params.wd} | grep "outliers" -A1 | tail -n 1`
+        echo $outliers
+        for o in $outliers
+        do
+            echo $o >> {output.outliers}
+        done
+
+        mv "{params.wd}.date.nexus" "{output.tree}"
+        mv "{params.wd}" "{output.log}"
+        rm "{params.wd}.nwk"
+        rm -rf "{params.wd}*"
+
+        echo `grep "], tMRCA" {output.log} | sed -e 's/rate [0-9\\.e+-]\\+ \\[[0-9\\.e+-]\\+; [0-9\\.e+-]\\+\\], tMRCA //g' \
+        | sed -e 's/ \\[[0-9\\.e+-]\\+; [0-9\\.e+-]\\+\\], objective function [0-9\\.e+-]\\+//g'` > {output.rd}
+        """
+
+
+
+rule name:
+    '''
+    Names a tree while converting it to newick.
+    '''
+    input:
+        tree = os.path.join(folder, 'timetree_{n}.nexus'),
+    output:
+        tree = os.path.join(folder, 'timetree_{n}.nwk'),
+    threads: 1
+    singularity: "docker://evolbioinfo/pastml:v1.9.49"
+    params:
+        mem = 500000,
+        name = 'name_{n}',
+    shell:
+        """        
+        name_tree -i {input.tree} -o {output.tree}
+        """
+
+
+rule rescale:
+    '''
+    Rescales the tree into days.
+    '''
+    input:
+        tree = os.path.join(folder, '{tree}.nwk'),
+    output:
+        length = os.path.join(folder, '{tree}.days.nwk'),
+    singularity:
+        "docker://evolbioinfo/gotree:v0.4.4"
+    params:
+        mem = 2000,
+        name = 'tree_size',
+        qos = 'fast'
+    threads: 1
+    shell:
+        """
+        gotree stats -i {input.tree} | tail -n 1 | awk '{{print $3}}' > {output.length}
+        """
+
+
+rule est:
+    '''
+    Estimate the parameters.
+    '''
+    input:
+        tree = os.path.join(folder, 'timetree_{n}.nwk'),
+    output:
+        est = os.path.join(folder, 'timetree_{n}.est'),
+    threads: 1
+    params:
+        mem = 500000,
+        name = 'est_{n}',
+    shell:
+        """        
+        bdmult_infer --nwk {input.tree} --log {output.est} --psi 52 --upper_bounds 365 365 1 500 --ci
+        """
