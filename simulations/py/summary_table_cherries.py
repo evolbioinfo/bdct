@@ -73,7 +73,9 @@ if __name__ == "__main__":
 
             print(f'{model} on {data_type}s:')
 
-            print(f'\tTP={TP}, TN={TN}, FP={FP}, FN={FN}, sensitivity={TP/(TP + FN) if (TP or FN) else 'NA'}, specificity={TN/(TN + FP) if (TN or FP) else 'NA'}')
+            sensitivity = TP / (TP + FN) if (TP or FN) else 'NA'
+            specificity = TN / (TN + FP) if (TN or FP) else 'NA'
+            print(f'\tTP={TP}, TN={TN}, FP={FP}, FN={FN}, sensitivity={sensitivity}, specificity={specificity}')
 
             print('--------all:')
 
@@ -91,13 +93,17 @@ if __name__ == "__main__":
 
             ddff = ddf[(ddf['result'] == 'FN') | (ddf['result'] == 'FP')]
 
-            print(f'\tnum cherries\t{'\t'.join(f'{_}' for _ in ddff['num_cherries'].astype(int).to_list())}')
+            num_cherries = '\t'.join(f'{_}' for _ in ddff['num_cherries'].astype(int).to_list())
+            print(f'\tnum cherries\t{num_cherries}')
             # print(f'\tnum tips\t{ddff['num_tips'].astype(int).to_list()}')
             # print(f'\tnum tips in cherries\t{ddff['tips_in_cherries'].astype(float).to_list()}')
-            print(f'\tinfectious_vs_notified_time\t{'\t'.join(f'{_:.1f}' for _ in ddff['infectious_vs_notified_time'].astype(float).to_list())}')
+            inf_vs_notified_times = '\t'.join(f'{_:.1f}' for _ in ddff['infectious_vs_notified_time'].astype(float).to_list())
+            print(f'\tinfectious_vs_notified_time\t{inf_vs_notified_times}')
             # print(f'\tups\t{ddff['upsilon'].astype(float).to_list()}')
-            print(f'\trho\t{'\t'.join(f'{_:.3f}' for _ in ddff['rho'].astype(float).to_list())}')
-            print(f'\trho*ups\t{'\t'.join(f'{_:.3f}' for _ in ddff['upsilon_rho'].astype(float).to_list())}')
+            rho = '\t'.join(f'{_:.3f}' for _ in ddff['rho'].astype(float).to_list())
+            print(f'\trho\t{rho}')
+            rho_ups = '\t'.join(f'{_:.3f}' for _ in ddff['upsilon_rho'].astype(float).to_list())
+            print(f'\trho*ups\t{rho_ups}')
 
 
             df.loc[f'{model}.{data_type}.mean',

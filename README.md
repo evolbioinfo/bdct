@@ -75,16 +75,16 @@ in Python3, or via command line (requires installation with Python3).
 
 ### Run in python3 or command-line (for linux systems, recommended Ubuntu 21 or newer versions)
 
-You could either install python (version 3.9 or higher) system-wide and then install bdct via pip:
+You could either install python (version 3.10 or higher) system-wide and then install bdct via pip:
 ```bash
 sudo apt install -y python3 python3-pip python3-setuptools python3-distutils
 pip3 install bdct
 ```
 
-or alternatively, you could install python (version 3.9 or higher) and bdct via [conda](https://conda.io/docs/) (make sure that conda is installed first). 
+or alternatively, you could install python (version 3.10 or higher) and bdct via [conda](https://conda.io/docs/) (make sure that conda is installed first). 
 Here we will create a conda environment called _bdctenv_:
 ```bash
-conda create --name bdctenv python=3.9
+conda create --name bdctenv python=3.10
 conda activate bdctenv
 pip install bdct
 ```

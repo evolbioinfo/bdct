@@ -24,10 +24,10 @@ setup(
     author_email='anna.zhukova@pasteur.fr',
     url='https://github.com/evolbioinfo/bdct',
     keywords=['phylogenetics', 'birth-death model', 'partner notification', 'contact tracing', 'BD', 'BD-CT'],
-    install_requires=['ete3', 'numpy==2.0.2', "scipy==1.14.1", 'biopython'],
+    install_requires=['six', 'ete3', 'numpy==2.0.2', "scipy==1.14.1", 'biopython'],
     entry_points={
             'console_scripts': [
-                'bdct_infer = bdct.bdctmodel:main',
+                'bdct_infer = bdct.bdct_model:main',
                 'bd_infer = bdct.bd_model:main',
                 'bdct_loglikelihood = bdct.bdct_model:loglikelihood_main',
                 'bd_loglikelihood = bdct.bd_model:loglikelihood_main',
