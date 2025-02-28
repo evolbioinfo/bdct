@@ -1,0 +1,173 @@
+import os
+
+# To run locally:
+# snakemake --snakefile Snakefile_lk --keep-going --cores 7 --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
+
+
+
+localrules: all
+
+os.makedirs('logs', exist_ok=True)
+
+
+folder = config.get("folder", '.')
+n = int(config.get("num", 100))
+REPETITIONS = list(range(n))
+M = int(config.get('max', 1000))
+EST_ML = ['bd', 'bdct']
+
+ruleorder: likelihood_real_bd > likelihood_real_bdct
+
+
+rule all:
+    input:
+        expand(os.path.join(folder, 'BDCT{n}', 'likelihood_stats_{estimator}.tree.txt'), n=[0, 1, 2, M], estimator=EST_ML),
+        expand(os.path.join(folder, 'BDCT{n}', 'lk_ratio_tests.tree.tab'), n=[0, 1, 2, M])
+
+
+rule likelihood_bdct:
+    '''
+    Calculate likelihood value for estimated parameters.
+    '''
+    input:
+        log = os.path.join(folder, '{model}', '{type}.{i}.est_bdct'),
+        nwk = os.path.join(folder, '{model}', '{type}.{i}.nwk'),
+    output:
+        lk = os.path.join(folder, '{model}', '{type,tree|forest}.{i}.lk_bdct'),
+    params:
+        mem = 2000,
+        name = 'lk_{i}_bdct',
+        qos = 'fast',
+    threads: 1
+    singularity: "docker://evolbioinfo/bdct:v0.1.23"
+    shell:
+        """
+        #,R0,infectious time,sampling probability,notification probability,removal time after notification,transmission rate,removal rate,partner removal rate
+        R=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $2 }}'`
+        it=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $3 }}'`
+        p=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $4 }}'`
+        upsilon=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $5 }}'`
+        rt=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $6 }}'`
+        psi=`echo "print(1/${{it}})" | python3`
+        phi=`echo "print(1/${{rt}})" | python3`
+        la=`echo "print($R*${{psi}})" | python3`
+        
+        bdct_loglikelihood --nwk {input.nwk} --la $la --psi $psi --p $p --upsilon $upsilon --phi $phi > {output.lk}
+        """
+
+rule likelihood_real_bdct:
+    '''
+    Calculate likelihood value for real parameters.
+    '''
+    input:
+        log = os.path.join(folder, '{model}', '{type}.{i}.log'),
+        nwk = os.path.join(folder, '{model}', '{type}.{i}.nwk'),
+    output:
+        lk = os.path.join(folder, '{model}', '{type,tree|forest}.{i}.lk_real'),
+    params:
+        mem = 2000,
+        name = 'lk_{i}_bdct_real',
+        qos = 'fast',
+    threads: 1
+    singularity: "docker://evolbioinfo/bdct:v0.1.23"
+    shell:
+        """        
+        la=`tail -n 1 {input.log} | awk -F',' '{{ print $4 }}'`
+        psi=`tail -n 1 {input.log} | awk -F',' '{{ print $5 }}'`
+        p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
+        phi=`tail -n 1 {input.log} | awk -F',' '{{ print 1 / $7 }}'`
+        upsilon=`tail -n 1 {input.log} | awk -F',' '{{ print $6 }}'`
+        
+        bdct_loglikelihood --nwk {input.nwk} --la $la --psi $psi --p $p --upsilon $upsilon --phi $phi > {output.lk}
+        """
+
+rule likelihood_bd:
+    '''
+    Calculate likelihood value for estimated parameters.
+    '''
+    input:
+        log=os.path.join(folder,'{model}', '{type}.{i}.est_bd'),
+        nwk=os.path.join(folder,'{model}', '{type}.{i}.nwk'),
+    output:
+        lk=os.path.join(folder,'{model}', '{type,tree|forest}.{i}.lk_bd'),
+    params:
+        mem=2000,
+        name='lk_{i}_bdct',
+        qos='fast',
+    threads: 1
+    singularity: "docker://evolbioinfo/bdct:v0.1.23"
+    shell:
+        """
+        #,R0,infectious time,sampling probability,transmission rate,removal rate
+        R=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $2 }}'`
+        it=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $3 }}'`
+        p=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $4 }}'`
+        psi=`echo "print(1/${{it}})" | python3`
+        la=`echo "print($R*${{psi}})" | python3`
+
+        bd_loglikelihood --nwk {input.nwk} --la $la --psi $psi --p $p > {output.lk}
+        """
+
+rule likelihood_real_bd:
+    '''
+    Calculate likelihood value for real parameters.
+    '''
+    input:
+        log = os.path.join(folder, 'BDCT0', '{type}.{i}.log'),
+        nwk = os.path.join(folder, 'BDCT0', '{type}.{i}.nwk'),
+    output:
+        lk = os.path.join(folder, 'BDCT0', '{type,tree|forest}.{i}.lk_real'),
+    params:
+        mem = 2000,
+        name = 'lk_{i}_bd_real',
+        qos = 'fast',
+    threads: 1
+    singularity: "docker://evolbioinfo/bdct:v0.1.23"
+    shell:
+        """
+        la=`tail -n 1 {input.log} | awk -F',' '{{ print $4 }}'`
+        psi=`tail -n 1 {input.log} | awk -F',' '{{ print $5 }}'`
+        p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
+        
+        bd_loglikelihood --nwk {input.nwk} --la $la --psi $psi --p $p  > {output.lk}
+        """
+
+rule likelihood_stats:
+    '''
+    Calculate likelihood values for estimated parameters.
+    '''
+    input:
+        lk = expand(os.path.join(folder, '{{model}}', '{{type}}.{i}.lk_{{estimator}}'), i=REPETITIONS),
+        lk_real = expand(os.path.join(folder, '{{model}}', '{{type}}.{i}.lk_real'), i=REPETITIONS),
+    output:
+        stats = os.path.join(folder, '{model}', 'likelihood_stats_{estimator}.{type,tree|forest}.txt'),
+    params:
+        mem = 2000,
+        name = 'likelihoods',
+        qos = 'fast'
+    threads: 1
+    singularity: "docker://evolbioinfo/bdct:v0.1.23"
+    shell:
+        """
+        python3 py/likelihood_stats.py --likelihoods_est {input.lk} --likelihoods_real {input.lk_real} --log {output.stats}
+        """
+
+rule lk_ratio:
+    '''
+    Combine results.
+    '''
+    input:
+        log_ct = expand(os.path.join(folder, '{{model}}', '{{type}}.{i}.p.lk_bdct'), i=REPETITIONS),
+        log = expand(os.path.join(folder, '{{model}}', '{{type}}.{i}.p.lk_bd'), i=REPETITIONS)
+    output:
+        tab = os.path.join(folder, '{model}', 'lk_ratio_tests.{type,tree|forest}.tab'),
+    params:
+        mem = 2000,
+        name = 'combine',
+        qos = 'fast',
+    threads: 1
+    singularity: "docker://evolbioinfo/pastml:v1.9.43"
+    shell:
+        """
+        python3 py/summary_table_lk_ratio.py --ct {input.log_ct} --no_ct {input.log} --tab {output.tab}
+        """

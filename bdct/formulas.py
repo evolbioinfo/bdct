@@ -1,6 +1,62 @@
 import numpy as np
 
-from bdpn.parameter_estimator import rescale_log, MIN_VALUE
+from bdct.parameter_estimator import rescale_log, MIN_VALUE
+
+N2LOG_FACTORIAL = {0: 0, 1: 0, 2: np.log(2)}
+
+
+EPSILON = 1e-6
+
+N_INTERVALS = 10000
+
+
+def get_tt_log(T):
+    logT = np.log(T + 1)
+    logdt = logT / N_INTERVALS
+    tt = np.maximum((T - (np.exp(np.arange(0, N_INTERVALS + 1) * logdt) - 1))[::-1], 0)
+
+    def get_value(array, t_targ):
+        if t_targ <= 0:
+            return array[0] if len(array.shape) == 1 else array[:, 0]
+        if t_targ >= T:
+            return array[-1] if len(array.shape) == 1 else array[:, -1]
+        i = len(tt) - 1 - int(np.log(T + 1 - t_targ) // logdt)
+        t, t_prev = tt[i], tt[i - 1]
+        value_t, value_t_prev = (array[i], array[i - 1]) if len(array.shape) == 1 else (array[:, i], array[:, i - 1])
+
+        log_prev = np.log(T + 1 - t_prev)
+        log_t = np.log(T + 1 - t)
+        log_targ = np.log(T + 1 - t_targ)
+        return value_t_prev + (value_t - value_t_prev) * (log_targ - log_prev) / (log_t - log_prev)
+
+    return tt, get_value
+
+
+def get_tt_normal(T):
+    dt = T / N_INTERVALS
+    tt = np.arange(0, N_INTERVALS + 1) * dt
+
+    def get_value(array, t_targ):
+        if t_targ <= 0:
+            return array[0] if len(array.shape) == 1 else array[:, 0]
+        if t_targ >= T:
+            return array[-1] if len(array.shape) == 1 else array[:, -1]
+        i = int((t_targ + dt) // dt)
+        t, t_prev = tt[i], tt[i - 1]
+        value_t, value_t_prev = (array[i], array[i - 1]) if len(array.shape) == 1 else (array[:, i], array[:, i - 1])
+        return value_t_prev + (value_t - value_t_prev) * (t_targ - t_prev) / (t - t_prev)
+
+    return tt, get_value
+
+
+def get_tt(T, as_log=False):
+    return get_tt_log(T) if as_log else get_tt_normal(T)
+
+
+def log_factorial(n):
+    if n not in N2LOG_FACTORIAL:
+        N2LOG_FACTORIAL[n] = np.log(n) + log_factorial(n - 1)
+    return N2LOG_FACTORIAL[n]
 
 
 def get_c1(la, psi, rho):
@@ -154,3 +210,14 @@ def log_subtraction(log_minuend, log_subtrahend):
             factors = 0
         return MIN_VALUE - factors
     return np.log(diff) - factors
+
+def prob_event1_before_other_events(rate1, *other_rates):
+    """
+    Calculates the probability that an event occurring at a constant rate rate1 happens
+    before any of the events occurring at a constant rates other_rates.
+
+    :param rate1: rate of the first event
+    :param other_rates: rates of later events
+    :return: probability described above
+    """
+    return rate1 / (rate1 + sum(other_rates))

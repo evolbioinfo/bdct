@@ -2,7 +2,7 @@ import unittest
 
 from ete3 import Tree
 
-from bdpn.tree_manager import preannotate_notifiers, NOTIFIERS, get_total_num_notifiers, get_min_num_notifiers, get_max_num_notifiers
+from bdct.tree_manager import preannotate_notifiers, NOTIFIERS, get_total_num_notifiers, get_min_num_notifiers, get_max_num_notifiers
 
 NWK = '((A:1, B:1)AB:1, (C:1, (D:1, ((E:1, F:1)EF:1, (G:1, H:1)GH:1)EH:1)DH:1)CH:1)root:0;'
 

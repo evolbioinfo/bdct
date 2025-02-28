@@ -1,52 +1,62 @@
 import os
 
+
+
 # To run locally:
-# snakemake --snakefile Snakefile_cherry_test --keep-going --cores 7 --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
+# snakemake --snakefile Snakefile_cherry_test --keep-going --cores 7 --config sf=small --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
+# To run on maestro
+# source ~/.bashrc && conda activate snakemake && module load apptainer && cd /pasteur/zeus/projets/p01/Evolbioinfo/users/azhukova/projects/bdext/simulations_ct
+# snakemake --snakefile Snakefile_cherry_test --config sf=small --keep-going --cores 1 --use-singularity --singularity-prefix $HOME/.singularity --singularity-args "-B /pasteur" --cluster "sbatch -c {threads} -o {folder}/logs/{params.name}.log -e {folder}/logs/{params.name}.log --mem {params.mem} -p common --qos={params.qos}  -A bioevo -J {params.name}" --jobs 300
+snakemake_settings = "  --keep-going --cores 1 --jobs 500 --rerun-incomplete --cluster  \"sbatch -c {threads} -o {folder}/logs/{params.name}.log -e {folder}/logs/{params.name}.log --mem {params.mem} -p common --qos={params.qos}  -A bioevo -J {params.name}\"  --use-singularity --singularity-prefix \"$HOME/.singularity\" --singularity-args \"-B /pasteur\" "
 
 
 localrules: all
 
-folder = os.path.abspath(config.get("folder", '.'))
-sim_folder = os.path.abspath(config.get("sf", os.path.join(folder, 'medium')))
-# sim_folder = os.path.abspath(config.get("sf", os.path.join(folder, 'small')))
-n = int(config.get("n", 100))
-REPETITIONS = list(range(n))
 
+
+folder = config.get("folder", '')
+num = int(config.get("num", 100))
+REPETITIONS = list(range(num))
+M = int(config.get('max', 1000))
+
+MODELS = ['BD', 'BDEI', 'BDSS']
+
+os.makedirs('logs', exist_ok=True)
 
 rule all:
     input:
-        os.path.join(sim_folder, 'cherry_tests.tab'),
+        os.path.join(folder, 'cherry_tests.tab')
 
 
 rule cherry_test:
     '''
-    PN-test on a given tree.
+    CT-test on a given tree/forest.
     '''
     input:
-        nwk=os.path.join(sim_folder,'{model}','tree.{i}.nwk')
+        nwk=os.path.join(folder,'{model}','{type}.{i}.nwk')
     output:
-        log=os.path.join(sim_folder,'{model}','tree.{i}.cherry_test'),
+        log=os.path.join(folder,'{model}','{type,tree|forest}.{i}.cherry_test'),
     params:
         mem=2000,
-        name='cherry_test_{i}',
+        name='ct_{i}',
         qos='fast'
     threads: 1
-    singularity: "docker://evolbioinfo/bdpn:v0.1.14"
+    singularity: "docker://evolbioinfo/bdct:v0.1.23"
     shell:
         """
-        pn_test --nwk {input.nwk} --log {output.log}
+        ct_test --nwk {input.nwk} --log {output.log}
         """
 
 
-rule combine:
+rule combine_ct:
     '''
     Combine results.
     '''
     input:
-        log = expand(os.path.join(sim_folder,'{model}','tree.{i}.cherry_test'), i=REPETITIONS,
-            model=['BD', 'BDPN', 'BDEI', 'BDEIPN', 'BDSS', 'BDSSPN', 'BDPN2'])
+        log = expand(os.path.join(folder, '{model}CT{n}', 'tree.{i}.cherry_test'), i=REPETITIONS,
+            n=[0, 1, 2, M], model=MODELS)
     output:
-        tab = os.path.join(sim_folder, 'cherry_tests.tab'),
+        tab = os.path.join(folder, 'cherry_tests.tab'),
     params:
         mem = 2000,
         name = 'combine',

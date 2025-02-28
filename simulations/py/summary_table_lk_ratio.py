@@ -7,12 +7,12 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Summarize likelihood ratios.")
-    parser.add_argument('--pn', nargs='+', type=str, help="BD-PN model likelihoods")
-    parser.add_argument('--no_pn', nargs='+', type=str, help="BD model likelihoods")
+    parser.add_argument('--ct', nargs='+', type=str, help="BD-CT model likelihoods")
+    parser.add_argument('--no_ct', nargs='+', type=str, help="BD model likelihoods")
     parser.add_argument('--tab', type=str, help="summary table")
     params = parser.parse_args()
 
-    df = pd.DataFrame(columns=['lk', 'lk_PN'])
+    df = pd.DataFrame(columns=['lk', 'lk_CT'])
 
     for log in params.no_pn:
         i = int(re.findall(r'[0-9]+', log)[-1])
@@ -24,9 +24,9 @@ if __name__ == "__main__":
         i = int(re.findall(r'[0-9]+', log)[-1])
         with open(log, 'r') as f:
             val = float(f.readline().strip('\n'))
-        df.loc[i, 'lk_PN'] = val
+        df.loc[i, 'lk_CT'] = val
 
-    df['lk_ratio'] = -2 * (df['lk'] - df['lk_PN'])
+    df['lk_ratio'] = -2 * (df['lk'] - df['lk_CT'])
     df['above_threshold'] = df['lk_ratio'] > 5.99
 
     df.sort_index(inplace=True)

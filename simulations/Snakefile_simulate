@@ -1,272 +1,232 @@
 import os
 
 # To run locally:
-# snakemake --snakefile Snakefile_simulate --keep-going --cores 1 --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
+# snakemake --snakefile Snakefile_simulate --rerun-triggers mtime --keep-going --cores 1 --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
 
 
 localrules: all
 
-folder = os.path.abspath(config.get("folder", '.'))
-sim_folder = os.path.abspath(config.get("sf", os.path.join(folder, 'medium')))
-# sim_folder = os.path.abspath(config.get("sf", os.path.join(folder, 'small')))
-n = int(config.get("n", 100))
-REPETITIONS = list(range(n))
+
+folder = config.get("folder", '')
+num = int(config.get("num", 100))
+REPETITIONS = list(range(num))
+os.makedirs('logs', exist_ok=True)
 
 m, M = int(config.get('min', 500)), int(config.get('max', 1000))
-# m, M = int(config.get('min', 50)), int(config.get('max', 100))
+MODELS = ['BDCT', 'BDEICT', 'BDSSCT']
 
 rule all:
     input:
-        expand(os.path.join(sim_folder, '{model}', 'tree.{i}.nwk'), i=REPETITIONS, model=['BDSS', 'BD', 'BDPN', 'BDEI', 'BDEIPN', 'BDSSPN']),
-        expand(os.path.join(sim_folder, '{model}', 'tree.{i}.nwk'), i=REPETITIONS, model=['BDPN2'])
+        expand(os.path.join(folder, '{model}{n}', 'tree.{i}.nwk'), i=REPETITIONS, \
+            n=[0, 1, 2, M], k=range(0, 100), model=MODELS),
     shell:
         """
-        snakemake --snakefile Snakefile_cherry_test --keep-going --cores 12 --config n={n} sf={sim_folder} --unlock 2> /dev/null
-        snakemake --snakefile Snakefile_cherry_test --keep-going --cores 12 --config n={n} sf={sim_folder}
+        snakemake --snakefile Snakefile_estimate --keep-going --cores 12 --config num={num} sf={folder} --unlock 2> /dev/null
+        snakemake --snakefile Snakefile_estimate --keep-going --cores 12 --config num={num} sf={folder}
         """
 
 
-rule simulate_bdeipn:
+rule simulate_bdct_tree:
     '''
-    Simulate a BDEIPN tree.
+    Simulate a BDCT tree.
     '''
-    input:
-        log=os.path.join(sim_folder,'BDPN','tree.{i}.log'),
     output:
-        log=os.path.join(sim_folder,'BDEIPN','tree.{i}.log'),
-        nwk=os.path.join(sim_folder,'BDEIPN','tree.{i}.nwk'),
+        log=os.path.join(folder,'BDCT{n}', 'tree.{i}.log'),
+        nwk=os.path.join(folder,'BDCT{n}', 'tree.{i}.nwk'),
     params:
         mem=2000,
-        name='simulate_{i}',
+        name='tre{n}.{i}',
         qos='fast'
     threads: 1
-    singularity: "docker://evolbioinfo/treesimulator:v0.1.19"
+    singularity: "docker://evolbioinfo/treesimulator:v0.2.3"
     shell:
-        """
-        R=`tail -n 1 {input.log} | awk -F',' '{{ print $1 }}'`
-        p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
-        upsilon=`tail -n 1 {input.log} | awk -F',' '{{ print $4 }}'`
-        it=`tail -n 1 {input.log} | awk -F',' '{{ print $2 }}'`
-        rt=`tail -n 1 {input.log} | awk -F',' '{{ print $5 }}'`
-        psi=`echo "print(1/${{it}})" | python3`
-        phi=`echo "print(1/${{rt}})" | python3`
-        la=`echo "print($R*${{psi}})" | python3`
-        mu=`echo "import numpy as np\nprint(1/20 + (1 - np.random.random(size=1)[0]) * (10 - 1/20))" | python3`
-        cat {input.log}
-
+        """        
         while [ ! -f {output.nwk} ]
-        do
-            timeout 10m generate_bdei --min_tips {m} --max_tips {M} --la $la --psi $psi --p $p --mu $mu\
-            --phi $phi  --upsilon $upsilon\
-            --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
-        done
-        """
-
-
-rule simulate_bdsspn:
-    '''
-    Simulate a BDSSPN tree.
-    '''
-    input:
-        log=os.path.join(sim_folder,'BDPN','tree.{i}.log'),
-    output:
-        log=os.path.join(sim_folder,'BDSSPN','tree.{i}.log'),
-        nwk=os.path.join(sim_folder,'BDSSPN','tree.{i}.nwk'),
-    params:
-        mem=2000,
-        name='simulate_{i}',
-        qos='fast'
-    threads: 1
-    singularity: "docker://evolbioinfo/treesimulator:v0.1.19"
-    shell:
-        """
-        R=`tail -n 1 {input.log} | awk -F',' '{{ print $1 }}'`
-        p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
-        upsilon=`tail -n 1 {input.log} | awk -F',' '{{ print $4 }}'`
-        it=`tail -n 1 {input.log} | awk -F',' '{{ print $2 }}'`
-        rt=`tail -n 1 {input.log} | awk -F',' '{{ print $5 }}'`
-        psi=`echo "print(1/${{it}})" | python3`
-        phi=`echo "print(1/${{rt}})" | python3`
-        la=`echo "print($R*${{psi}})" | python3`
-        x=`echo "import numpy as np\nprint(3 + (1 - np.random.random(size=1)[0]) * (10 - 3))" | python3`
-        f=`echo "import numpy as np\nprint(0.05 + (1 - np.random.random(size=1)[0]) * (0.2 - 0.05))" | python3`
-        lass=`echo "print(${{x}}*${{la}}*${{f}}/(1-${{f}}+${{f}}*${{x}}))" | python3`
-        lann=`echo "print(${{la}}-${{lass}})" | python3`
-        lans=`echo "print(${{lass}}/${{x}})" | python3`
-        lasn=`echo "print(${{lann}}*${{x}})" | python3`
-        cat {input.log}
-
-        while [ ! -f {output.nwk} ]
-        do
-            timeout 10m generate_bdss --min_tips {m} --max_tips {M} \
-            --la_ss $lass --la_sn $lasn --la_nn $lann --la_ns $lans \
-            --psi $psi --p $p \
-            --phi $phi  --upsilon $upsilon \
-            --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
-        done
-        """
-
-
-rule simulate_bdss:
-    '''
-    Simulate a BDSS tree.
-    '''
-    input:
-        log=os.path.join(sim_folder,'BDSSPN','tree.{i}.log'),
-    output:
-        log=os.path.join(sim_folder,'BDSS','tree.{i}.log'),
-        nwk=os.path.join(sim_folder,'BDSS','tree.{i}.nwk'),
-    params:
-        mem=2000,
-        name='simulate_{i}',
-        qos='fast'
-    threads: 1
-    singularity: "docker://evolbioinfo/treesimulator:v0.1.19"
-    shell:
-        """
-        R=`tail -n 1 {input.log} | awk -F',' '{{ print $1 }}'`
-        p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
-        it=`tail -n 1 {input.log} | awk -F',' '{{ print $2 }}'`
-        x=`tail -n 1 {input.log} | awk -F',' '{{ print $4 }}'`
-        f=`tail -n 1 {input.log} | awk -F',' '{{ print $5 }}'`
-        psi=`echo "print(1/${{it}})" | python3`
-        la=`echo "print($R*${{psi}})" | python3`
-        lass=`echo "print(${{x}}*${{la}}*${{f}}/(1-${{f}}+${{f}}*${{x}}))" | python3`
-        lann=`echo "print(${{la}}-${{lass}})" | python3`
-        lans=`echo "print(${{lass}}/${{x}})" | python3`
-        lasn=`echo "print(${{lann}}*${{x}})" | python3`
-        cat {input.log}
-
-        while [ ! -f {output.nwk} ]
-        do
-            timeout 10m generate_bdss --min_tips {m} --max_tips {M} \
-            --la_ss $lass --la_sn $lasn --la_nn $lann --la_ns $lans \
-            --psi $psi --p $p \
-            --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
-        done
-        """
-
-
-rule simulate_bdei:
-    '''
-    Simulate a BDEI tree.
-    '''
-    input:
-        log=os.path.join(sim_folder,'BDEIPN','tree.{i}.log'),
-    output:
-        log=os.path.join(sim_folder,'BDEI','tree.{i}.log'),
-        nwk=os.path.join(sim_folder,'BDEI','tree.{i}.nwk'),
-    params:
-        mem=2000,
-        name='simulate_{i}',
-        qos='fast'
-    threads: 1
-    singularity: "docker://evolbioinfo/treesimulator:v0.1.19"
-    shell:
-        """
-        R=`tail -n 1 {input.log} | awk -F',' '{{ print $1 }}'`
-        ip=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
-        p=`tail -n 1 {input.log} | awk -F',' '{{ print $4 }}'`
-        it=`tail -n 1 {input.log} | awk -F',' '{{ print $2 }}'`
-        psi=`echo "print(1/${{it}})" | python3`
-        mu=`echo "print(1/${{ip}})" | python3`
-        la=`echo "print($R*${{psi}})" | python3`
-        cat {input.log}
-
-        while [ ! -f {output.nwk} ]
-        do
-            timeout 10m generate_bdei --min_tips {m} --max_tips {M} --la $la --psi $psi --p $p --mu $mu\
-            --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
-        done
-        """
-
-
-rule simulate_bdpn:
-    '''
-    Simulate a BDPN tree.
-    '''
-    output:
-        log = os.path.join(sim_folder, 'BDPN', 'tree.{i}.log'),
-        nwk = os.path.join(sim_folder, 'BDPN', 'tree.{i}.nwk'),
-    params:
-        mem = 2000,
-        name = 'simulate_{i}',
-        qos = 'fast'
-    threads: 1
-    singularity: "docker://evolbioinfo/treesimulator:v0.1.19"
-    shell:
-        """
-        while [ ! -f {output.nwk} ]
-        do
-            timeout 60s python3 py/tree_generator.py --min_tips {m} --max_tips {M} --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
-        done
-        """
-
-
-rule simulate_bdpn_all_partners:
-    '''
-    Simulate a BDPN tree.
-    '''
-    input:
-        log=os.path.join(sim_folder,'BDPN','tree.{i}.log'),
-    output:
-        log = os.path.join(sim_folder, 'BDPN2', 'tree.{i}.log'),
-        nwk = os.path.join(sim_folder, 'BDPN2', 'tree.{i}.nwk'),
-    params:
-        mem = 2000,
-        name = 'simulate_{i}',
-        qos = 'fast'
-    threads: 1
-    singularity: "docker://evolbioinfo/treesimulator:v0.1.22"
-    shell:
-        """
-        R=`tail -n 1 {input.log} | awk -F',' '{{ print $1 }}'`
-        p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
-        upsilon=`tail -n 1 {input.log} | awk -F',' '{{ print $4 }}'`
-        it=`tail -n 1 {input.log} | awk -F',' '{{ print $2 }}'`
-        rt=`tail -n 1 {input.log} | awk -F',' '{{ print $5 }}'`
-        T=`tail -n 1 {input.log} | awk -F',' '{{ print $7 }}'`
-        psi=`echo "print(1/${{it}})" | python3`
-        phi=`echo "print(1/${{rt}})" | python3`
-        la=`echo "print($R*${{psi}})" | python3`
-        cat {input.log}
+        do             
+            python3 py/parameter_generator.py --log {output.log}.params  --kappa {wildcards.n} \
+            --min_R0 1 \
+            --max_R0 10  \
+            --min_rho 0.05  \
+            --max_rho 0.75  \
+            --min_di 1  \
+            --max_di 21  \
+            --min_rho_ups 0.01  \
+            --max_ups 0.75  \
+            --min_phi_by_psi 10  \
+            --max_phi_by_psi 500  \
+            --min_f 0.01  \
+            --max_f 0.5  \
+            --min_x 2  \
+            --max_x 100  \
+            --min_de_by_di_de 0.05  \
+            --max_de_by_di_de 0.95  
         
-        while [ ! -f {output.nwk} ]
-        do
-            timeout 10m generate_bd --min_tips {m} --max_tips {M} \
-            --la $la --psi $psi --p $p \
-            --phi $phi  --upsilon $upsilon --max_notified_partners {M} \
-            --nwk {output.nwk} --log {output.log} --T $T || echo 'The forest took too long, restarting!'
+            la=`tail -n 1 {output.log}.params | awk -F',' '{{ print $1 }}'`
+            psi=`tail -n 1 {output.log}.params | awk -F',' '{{ print $2 }}'`
+            p=`tail -n 1 {output.log}.params | awk -F',' '{{ print $3 }}'`
+            phi=`tail -n 1 {output.log}.params | awk -F',' '{{ print $4 }}'`
+            upsilon=`tail -n 1 {output.log}.params | awk -F',' '{{ print $5 }}'`
+            
+            SECONDS=0
+            while (( SECONDS < 900)); 
+            do    
+                timeout 4m generate_bd --min_tips {m} --max_tips {M} --la $la --psi $psi --p $p \
+                --phi $phi  --upsilon $upsilon --max_notified_contacts {wildcards.n} \
+                --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
+                
+                if [[ -f {output.nwk} ]]; then
+                    break
+                fi    
+            done
+            
+            rm -rf {output.log}.params
+            
+            if [[ -f {output.nwk} ]]; then
+                # remove the root branch
+                sed -i 's/:[0-9\\.]\\+;/;/g' {output.nwk}
+                break
+            fi
+            
+            echo 'The parameter set took too long, restarting!'
         done
         """
 
 
-rule simulate_bd:
+
+rule simulate_bdeict_tree:
     '''
-    Simulate a BD tree for the same parameters as the corresponding BDPN tree.
+    Simulate a BDCT tree.
     '''
-    input:
-        log=os.path.join(sim_folder, 'BDPN', 'tree.{i}.log'),
     output:
-        log=os.path.join(sim_folder, 'BD', 'tree.{i}.log'),
-        nwk=os.path.join(sim_folder, 'BD', 'tree.{i}.nwk')
+        log=os.path.join(folder,'BDEICT{n}','tree.{i}.log'),
+        nwk=os.path.join(folder,'BDEICT{n}','tree.{i}.nwk'),
     params:
         mem=2000,
-        name='simulate_{i}',
+        name='tre{n}.{i}',
         qos='fast'
     threads: 1
-    singularity: "docker://evolbioinfo/treesimulator:v0.1.19"
+    singularity: "docker://evolbioinfo/treesimulator:v0.2.3"
     shell:
-        """
-        R=`tail -n 1 {input.log} | awk -F',' '{{ print $1 }}'`
-        p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
-        it=`tail -n 1 {input.log} | awk -F',' '{{ print $2 }}'`
-        psi=`echo "print(1/${{it}})" | python3`
-        la=`echo "print($R*${{psi}})" | python3`
-        cat {input.log}
-
+        """        
         while [ ! -f {output.nwk} ]
-        do
-            timeout 10m generate_bd --min_tips {m} --max_tips {M} --la $la --psi $psi --p $p --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
+        do             
+            python3 py/parameter_generator.py --log {output.log}.params  --kappa {wildcards.n} \
+            --min_R0 1 \
+            --max_R0 10  \
+            --min_rho 0.05  \
+            --max_rho 0.75  \
+            --min_di 1  \
+            --max_di 21  \
+            --min_rho_ups 0.01  \
+            --max_ups 0.75  \
+            --min_phi_by_psi 10  \
+            --max_phi_by_psi 500  \
+            --min_f 0.01  \
+            --max_f 0.5  \
+            --min_x 2  \
+            --max_x 100  \
+            --min_de_by_di_de 0.05  \
+            --max_de_by_di_de 0.95  
+
+            la=`tail -n 1 {output.log}.params | awk -F',' '{{ print $1 }}'`
+            psi=`tail -n 1 {output.log}.params | awk -F',' '{{ print $2 }}'`
+            p=`tail -n 1 {output.log}.params | awk -F',' '{{ print $3 }}'`
+            phi=`tail -n 1 {output.log}.params | awk -F',' '{{ print $4 }}'`
+            upsilon=`tail -n 1 {output.log}.params | awk -F',' '{{ print $5 }}'`
+            mu=`tail -n 1 {output.log}.params | awk -F',' '{{ print $6 }}'`
+
+            SECONDS=0
+            while (( SECONDS < 900)); 
+            do    
+                timeout 4m generate_bdei --min_tips {m} --max_tips {M} --la $la --psi $psi --p $p --mu $mu \
+                --phi $phi  --upsilon $upsilon --max_notified_contacts {wildcards.n} \
+                --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
+
+                if [[ -f {output.nwk} ]]; then
+                    break
+                fi    
+            done
+
+            rm -rf {output.log}.params
+
+            if [[ -f {output.nwk} ]]; then
+                # remove the root branch
+                sed -i 's/:[0-9\\.]\\+;/;/g' {output.nwk}
+                break
+            fi
+
+            echo 'The parameter set took too long, restarting!'
+        done
+        """
+
+
+rule simulate_bdssct_tree:
+    '''
+    Simulate a BDSSCT tree.
+    '''
+    output:
+        log=os.path.join(folder,'BDSSCT{n}','tree.{i}.log'),
+        nwk=os.path.join(folder,'BDSSCT{n}','tree.{i}.nwk'),
+    params:
+        mem=2000,
+        name='tre{n}.{i}',
+        qos='fast'
+    threads: 1
+    singularity: "docker://evolbioinfo/treesimulator:v0.2.3"
+    shell:
+        """        
+        while [ ! -f {output.nwk} ]
+        do             
+            python3 py/parameter_generator.py --log {output.log}.params  --kappa {wildcards.n} \
+            --min_R0 1 \
+            --max_R0 10  \
+            --min_rho 0.05  \
+            --max_rho 0.75  \
+            --min_di 1  \
+            --max_di 21  \
+            --min_rho_ups 0.01  \
+            --max_ups 0.75  \
+            --min_phi_by_psi 10  \
+            --max_phi_by_psi 500  \
+            --min_f 0.01  \
+            --max_f 0.5  \
+            --min_x 2  \
+            --max_x 100  \
+            --min_de_by_di_de 0.05  \
+            --max_de_by_di_de 0.95  
+
+            
+            lass=`tail -n 1 {output.log}.params | awk -F',' '{{ print $9 }}'`
+            lann=`tail -n 1 {output.log}.params | awk -F',' '{{ print $10 }}'`
+            lasn=`tail -n 1 {output.log}.params | awk -F',' '{{ print $11 }}'`
+            lans=`tail -n 1 {output.log}.params | awk -F',' '{{ print $12 }}'`
+            psi=`tail -n 1 {output.log}.params | awk -F',' '{{ print $2 }}'`
+            p=`tail -n 1 {output.log}.params | awk -F',' '{{ print $3 }}'`
+            phi=`tail -n 1 {output.log}.params | awk -F',' '{{ print $4 }}'`
+            upsilon=`tail -n 1 {output.log}.params | awk -F',' '{{ print $5 }}'`
+
+            SECONDS=0
+            while (( SECONDS < 900)); 
+            do    
+                timeout 4m generate_bdss --min_tips {m} --max_tips {M} \
+                --la_ss $lass --la_sn $lasn --la_nn $lann --la_ns $lans \
+                --psi $psi --p $p \
+                --phi $phi  --upsilon $upsilon --max_notified_contacts {wildcards.n} \
+                --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
+
+                if [[ -f {output.nwk} ]]; then
+                    break
+                fi    
+            done
+
+            rm -rf {output.log}.params
+
+            if [[ -f {output.nwk} ]]; then
+                # remove the root branch
+                sed -i 's/:[0-9\\.]\\+;/;/g' {output.nwk}
+                break
+            fi
+
+            echo 'The parameter set took too long, restarting!'
         done
         """

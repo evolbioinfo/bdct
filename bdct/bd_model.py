@@ -2,9 +2,19 @@ import os
 
 import numpy as np
 
-from bdpn.formulas import get_c1, get_c2, get_E, get_log_p, get_u
-from bdpn.parameter_estimator import optimize_likelihood_params, estimate_cis
-from bdpn.tree_manager import TIME, read_forest, annotate_forest_with_time, get_T, resolve_forest
+from bdct.formulas import get_c1, get_c2, get_E, get_log_p, get_u, log_factorial
+from bdct.parameter_estimator import optimize_likelihood_params, estimate_cis
+from bdct.tree_manager import TIME, read_forest, annotate_forest_with_time, get_T
+
+REMOVAL_RATE = 'removal rate'
+TRANSMISSION_RATE = 'transmission rate'
+SAMPLING_PROBABILITY = 'sampling probability'
+INFECTIOUS_TIME = 'infectious time'
+REPRODUCTIVE_NUMBER = 'R0'
+
+RHO = 'rho'
+PSI = 'psi'
+LA = 'la'
 
 DEFAULT_MIN_PROB = 1e-6
 DEFAULT_MAX_PROB = 1
@@ -14,8 +24,29 @@ DEFAULT_MAX_RATE = 1e3
 DEFAULT_LOWER_BOUNDS = [DEFAULT_MIN_RATE, DEFAULT_MIN_RATE, DEFAULT_MIN_PROB]
 DEFAULT_UPPER_BOUNDS = [DEFAULT_MAX_RATE, DEFAULT_MAX_RATE, DEFAULT_MAX_PROB]
 
-PARAMETER_NAMES = np.array(['la', 'psi', 'rho'])
+PARAMETER_NAMES = np.array([LA, PSI, RHO])
+EPI_PARAMETER_NAMES = np.array([REPRODUCTIVE_NUMBER, INFECTIOUS_TIME])
 
+
+def rates2epi(params):
+    """
+    Transforms [la, psi, rho] to [Re, d_infectious, rho]
+
+    :param params:
+    :return:
+    """
+    la, psi, rho = params
+    return np.array([la / psi, 1 / psi, rho])
+
+def epi2rates(params):
+    """
+    Transforms [Re, d_infectious, rho] to [la, psi, rho]
+
+    :param params:
+    :return:
+    """
+    Re, d_i, rho = params
+    return np.array([Re / d_i, 1 / d_i, rho])
 
 def get_start_parameters(forest, la=None, psi=None, rho=None):
     la_is_fixed = la is not None and la > 0
@@ -53,23 +84,26 @@ def loglikelihood(forest, la, psi, rho, T, threads=1, u=-1):
     c2 = get_c2(la=la, psi=psi, c1=c1)
 
     log_psi_rho = np.log(psi) + np.log(rho)
-    log_two_la = np.log(2) + np.log(la)
+    log_la = np.log(la)
 
     hidden_lk = get_u(la, psi, c1, E_t=get_E(c1=c1, c2=c2, t=0, T=T))
-    u = len(forest) * hidden_lk / (1 - hidden_lk) if u is None or u < 0 else u
-    res = u * np.log(hidden_lk)
+    if hidden_lk:
+        u = len(forest) * hidden_lk / (1 - hidden_lk) if u is None or u < 0 else u
+        res = u * np.log(hidden_lk)
+    else:
+        res = 0
     for tree in forest:
         n = len(tree)
-        res += n * log_psi_rho + (n - 1) * log_two_la
+        res += n * log_psi_rho
         for n in tree.traverse('preorder'):
             if not n.is_leaf():
                 t = getattr(n, TIME)
                 E_t = get_E(c1=c1, c2=c2, t=t, T=T)
-                child1, child2 = n.children
-                ti_1 = getattr(child1, TIME)
-                ti_2 = getattr(child2, TIME)
-                res += get_log_p(c1, t, ti=ti_1, E_t=E_t, E_ti=get_E(c1, c2, ti_1, T)) \
-                       + get_log_p(c1, t, ti=ti_2, E_t=E_t, E_ti=get_E(c1, c2, ti_2, T))
+                num_children = len(n.children)
+                res += log_factorial(num_children) + (num_children - 1) * log_la
+                for child in n.children:
+                    ti = getattr(child, TIME)
+                    res += get_log_p(c1, t, ti=ti, E_t=E_t, E_ti=get_E(c1, c2, ti, T))
         root_ti = getattr(tree, TIME)
         root_t = root_ti - tree.dist
         res += get_log_p(c1, root_t, ti=root_ti, E_t=get_E(c1, c2, root_t, T), E_ti=get_E(c1, c2, root_ti, T))
@@ -77,7 +111,7 @@ def loglikelihood(forest, la, psi, rho, T, threads=1, u=-1):
 
 
 def infer(forest, T, la=None, psi=None, p=None,
-          lower_bounds=DEFAULT_LOWER_BOUNDS, upper_bounds=DEFAULT_UPPER_BOUNDS, ci=False, threads=1, **kwargs):
+          lower_bounds=DEFAULT_LOWER_BOUNDS, upper_bounds=DEFAULT_UPPER_BOUNDS, ci=False, threads=1, num_attemps=3, **kwargs):
     """
     Infers BD model parameters from a given forest.
 
@@ -108,42 +142,63 @@ def infer(forest, T, la=None, psi=None, p=None,
     bounds[:, 1] = upper_bounds
     start_parameters = get_start_parameters(forest, la, psi, p)
     input_params = np.array([la, psi, p])
-    print('Starting BD parameters:\t{}'
-          .format(', '.join('{}={:g}{}'.format(_[0], _[1], '' if _[2] is None else ' (fixed)')
-                            for _ in zip(PARAMETER_NAMES, start_parameters, input_params))))
-    vs, lk = optimize_likelihood_params(forest, T, input_parameters=input_params,
+    best_vs, best_lk = np.array(start_parameters), loglikelihood(forest, *start_parameters, T, threads)
+
+
+    print(f'Lower bounds are set to:\t{format_parameters(*lower_bounds, epi=False)}')
+    print(f'Upper bounds are set to:\t{format_parameters(*upper_bounds, epi=False)}\n')
+    print(f'Starting BD parameters:\t{format_parameters(*start_parameters, fixed=input_params)}\tloglikelihood={best_lk}')
+    vs, lk = optimize_likelihood_params(forest, T=T, input_parameters=input_params,
                                         loglikelihood_function=loglikelihood, bounds=bounds,
-                                        start_parameters=start_parameters)
-    print('Estimated BD parameters:\t{};\tloglikelihood={}'
-          .format(', '.join('{}={:g}'.format(*_) for _ in zip(PARAMETER_NAMES, vs)), lk))
+                                        start_parameters=start_parameters, threads=threads,
+                                        formatter=lambda _: format_parameters(*_), num_attemps=num_attemps)
+
+    print(f'Estimated BD parameters:\t{format_parameters(*vs)};\tloglikelihood={lk}')
+
+    if lk > best_lk:
+        best_lk = lk
+        best_vs = vs
     if ci:
         cis = estimate_cis(T, forest, input_parameters=input_params, loglikelihood_function=loglikelihood,
-                           optimised_parameters=vs, bounds=bounds, threads=threads)
-        print('Estimated CIs:\t{}'
-              .format(', '.join('{}=[{:g},{:g}]'.format(p, *p_ci) for (p, p_ci) in zip(PARAMETER_NAMES, cis))))
+                           optimised_parameters=best_vs, bounds=bounds, threads=threads)
+        print(f'Estimated CIs:\n\tlower:\t{format_parameters(*cis[:, 0], epi=False)}\n'
+              f'\tupper:\t{format_parameters(*cis[:, 1], epi=False)}')
     else:
         cis = None
-    return vs, cis
+    return best_vs, cis
 
 
 def save_results(vs, cis, log, ci=False):
     os.makedirs(os.path.dirname(os.path.abspath(log)), exist_ok=True)
     with open(log, 'w+') as f:
-        f.write(',{}\n'.format(','.join(['R0', 'infectious time', 'sampling probability',
-                                         'transmission rate', 'removal rate'])))
+        label_line = \
+            ','.join([REPRODUCTIVE_NUMBER, INFECTIOUS_TIME, SAMPLING_PROBABILITY, TRANSMISSION_RATE, REMOVAL_RATE])
+        f.write(f",{label_line}\n")
         la, psi, rho = vs
         R0 = la / psi
         rt = 1 / psi
-        f.write('value,{}\n'.format(','.join(str(_) for _ in [R0, rt, rho, la, psi])))
+        value_line = ",".join(f'{_:g}' for _ in [R0, rt, rho, la, psi])
+        f.write(f"value,{value_line}\n")
         if ci:
             (la_min, la_max), (psi_min, psi_max), (rho_min, rho_max) = cis
             R0_min, R0_max = la_min / psi, la_max / psi
             rt_min, rt_max = 1 / psi_max, 1 / psi_min
-            f.write('CI_min,{}\n'.format(
-                ','.join(str(_) for _ in [R0_min, rt_min, rho_min, la_min, psi_min])))
-            f.write('CI_max,{}\n'.format(
-                ','.join(str(_) for _ in [R0_max, rt_max, rho_max, la_max, psi_max])))
+            ci_min_line = ",".join(f'{_:g}' for _ in [R0_min, rt_min, rho_min, la_min, psi_min])
+            f.write(f"CI_min,{ci_min_line}\n")
+            ci_max_line = ",".join(f'{_:g}' for _ in [R0_max, rt_max, rho_max, la_max, psi_max])
+            f.write(f"CI_max,{ci_max_line}\n")
 
+
+def format_parameters(la, psi, rho, fixed=None, epi=True):
+    names = np.concatenate([PARAMETER_NAMES, EPI_PARAMETER_NAMES]) if epi else PARAMETER_NAMES
+    params = [la, psi, rho, la / psi, 1 / psi] if epi else [la, psi, rho]
+    if fixed is None:
+        return ', '.join('{}={:.6f}'.format(*_) for _ in zip(names, params))
+    else:
+        if epi:
+            fixed = np.concatenate([fixed, [fixed[0] and fixed[1], fixed[1], fixed[2]]])
+        return ', '.join('{}={:.6f}{}'.format(_[0], _[1], '' if _[2] is None else ' (fixed)')
+                         for _ in zip(names, params, fixed))
 
 def main():
     """
@@ -170,7 +225,7 @@ def main():
         raise ValueError('At least one of the model parameters needs to be specified for identifiability')
 
     forest = read_forest(params.nwk)
-    resolve_forest(forest)
+    # resolve_forest(forest)
     annotate_forest_with_time(forest)
     T = get_T(T=None, forest=forest)
     print('Read a forest of {} trees with {} tips in total, evolving over time {}'
@@ -198,7 +253,7 @@ def loglikelihood_main():
     params = parser.parse_args()
 
     forest = read_forest(params.nwk)
-    resolve_forest(forest)
+    # resolve_forest(forest)
     annotate_forest_with_time(forest)
     T = get_T(T=None, forest=forest)
     lk = loglikelihood(forest, la=params.la, psi=params.psi, rho=params.p, T=T)

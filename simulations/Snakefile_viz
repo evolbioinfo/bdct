@@ -7,218 +7,47 @@ import os
 
 localrules: all
 
+
 os.makedirs('logs', exist_ok=True)
 
-folder = os.path.abspath(config.get("folder", '.'))
-sim_folder = os.path.abspath(config.get("sf", os.path.join(folder, 'medium')))
-# sim_folder = os.path.abspath(config.get("sf", os.path.join(folder, 'small')))
-n = int(config.get("n", 100))
-REPETITIONS = list(range(n))
 
-pars = ['p']
+folder = config.get("folder", '.')
+
 
 rule all:
     input:
-        expand(os.path.join(sim_folder,'errors_{par}.svg'), par=pars),
-        expand(os.path.join(sim_folder, 'BDPN', 'errors_{par}.svg'), par=pars),
-        expand(os.path.join(sim_folder,'BDPN','likelihood_stats_bdpn.{par}.txt'), par=pars),
-        expand(os.path.join(sim_folder, 'BD','likelihood_stats_bd.{par}.txt'), par=pars),
-        expand(os.path.join(sim_folder, 'BD','likelihood_stats_bdpn.{par}.txt'), par=pars),
-        expand(os.path.join(sim_folder, 'BDPN2', 'errors_{par}.svg'), par=pars),
-        expand(os.path.join(sim_folder,'BDPN2','likelihood_stats_bdpn.{par}.txt'), par=pars),
-        expand(os.path.join(sim_folder, '{model}', 'CI_stats.txt'), model=['BDPN', 'BD', 'BDPN2']),
+        expand(os.path.join(folder, 'BDCT{n}', 'errors.svg'), n=[0, 1, 2, M]),
+        os.path.join(folder, 'error_bars.svg')
 
-rule likelihood_bdpn:
+
+rule plot_error_bars_all:
     '''
-    Calculate likelihood value for estimated parameters.
+    Plots the errors.
     '''
     input:
-        log = os.path.join(sim_folder, '{model}', 'tree.{i}.{p}.est_bdpn'),
-        nwk = os.path.join(sim_folder, '{model}', 'tree.{i}.nwk'),
+        tab = expand(os.path.join(folder, 'BDCT{n}', 'estimates.tab'), n=[0, 1, 2, M]),
     output:
-        lk = os.path.join(sim_folder, '{model}', 'tree.{i}.{p}.lk_bdpn'),
+        pdf = os.path.join(folder, 'error_bars.svg'),
     params:
         mem = 2000,
-        name = 'lk_{i}_bdpn',
-        qos = 'fast',
-    threads: 1
-    singularity: "docker://evolbioinfo/bdpn:v0.1.14"
-    shell:
-        """
-        R=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $2 }}'`
-        it=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $3 }}'`
-        p=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $4 }}'`
-        pn=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $5 }}'`
-        rt=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $6 }}'`
-        psi=`echo "print(1/${{it}})" | python3`
-        phi=`echo "print(1/${{rt}})" | python3`
-        la=`echo "print($R*${{psi}})" | python3`
-        
-        bdpn_loglikelihood --nwk {input.nwk} --la ${{la}} --psi ${{psi}} --p $p --upsilon ${{pn}} --phi ${{phi}} > {output.lk}
-        """
-
-rule likelihood_real_bdpn:
-    '''
-    Calculate likelihood value for real parameters.
-    '''
-    input:
-        log = os.path.join(sim_folder, '{model}', 'tree.{i}.log'),
-        nwk = os.path.join(sim_folder, '{model}', 'tree.{i}.nwk'),
-    output:
-        lk = os.path.join(sim_folder, '{model,BDP[N2]+}', 'tree.{i}.lk_real'),
-    params:
-        mem = 2000,
-        name = 'lk_{i}_bdpn_real',
-        qos = 'fast',
-    threads: 1
-    singularity: "docker://evolbioinfo/bdpn:v0.1.14"
-    shell:
-        """
-        R=`tail -n 1 {input.log} | awk -F',' '{{ print $1 }}'`
-        it=`tail -n 1 {input.log} | awk -F',' '{{ print $2 }}'`
-        p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
-        pn=`tail -n 1 {input.log} | awk -F',' '{{ print $4 }}'`
-        rt=`tail -n 1 {input.log} | awk -F',' '{{ print $5 }}'`
-        psi=`echo "print(1/${{it}})" | python3`
-        phi=`echo "print(1/${{rt}})" | python3`
-        la=`echo "print($R*${{psi}})" | python3`
-        
-        bdpn_loglikelihood --nwk {input.nwk} --la ${{la}} --psi ${{psi}} --p $p --upsilon ${{pn}} --phi ${{phi}} > {output.lk}
-        """
-
-rule likelihood_real_bd:
-    '''
-    Calculate likelihood value for real parameters.
-    '''
-    input:
-        log = os.path.join(sim_folder, 'BD', 'tree.{i}.log'),
-        nwk = os.path.join(sim_folder, 'BD', 'tree.{i}.nwk'),
-    output:
-        lk = os.path.join(sim_folder, 'BD', 'tree.{i}.lk_real'),
-    params:
-        mem = 2000,
-        name = 'lk_{i}_bd_real',
-        qos = 'fast',
-    threads: 1
-    singularity: "docker://evolbioinfo/bdpn:v0.1.14"
-    shell:
-        """
-        R=`tail -n 1 {input.log} | awk -F',' '{{ print $1 }}'`
-        it=`tail -n 1 {input.log} | awk -F',' '{{ print $2 }}'`
-        p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
-        psi=`echo "print(1/${{it}})" | python3`
-        la=`echo "print($R*${{psi}})" | python3`
-        
-        bd_loglikelihood --nwk {input.nwk} --la ${{la}} --psi ${{psi}} --p $p  > {output.lk}
-        """
-
-
-rule likelihood_bd:
-    '''
-    Calculate likelihood value for estimated parameters.
-    '''
-    input:
-        log=os.path.join(sim_folder,'{model}','tree.{i}.{p}.est_bd'),
-        nwk=os.path.join(sim_folder,'{model}','tree.{i}.nwk'),
-    output:
-        lk=os.path.join(sim_folder,'{model}','tree.{i}.{p}.lk_bd'),
-    params:
-        mem=2000,
-        name='lk_{i}_bd',
-        qos='fast',
-    threads: 1
-    singularity: "docker://evolbioinfo/bdpn:v0.1.14"
-    shell:
-        """
-        R=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $2 }}'`
-        it=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $3 }}'`
-        p=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $4 }}'`
-        psi=`echo "print(1/${{it}})" | python3`
-        la=`echo "print($R*${{psi}})" | python3`
-
-        bd_loglikelihood --nwk {input.nwk} --la ${{la}} --psi ${{psi}} --p $p > {output.lk}
-        """
-
-rule likelihood_stats:
-    '''
-    Calculate likelihood values for estimated parameters.
-    '''
-    input:
-        lk = expand(os.path.join(sim_folder, '{{model}}', 'tree.{i}.{{p}}.lk_{{type}}'), i=REPETITIONS),
-        lk_real = expand(os.path.join(sim_folder, '{{model}}', 'tree.{i}.lk_real'), i=REPETITIONS),
-    output:
-        stats = os.path.join(sim_folder, '{model}', 'likelihood_stats_{type}.{p}.txt'),
-    params:
-        mem = 2000,
-        name = 'likelihoods',
+        name = 'errors',
         qos = 'fast'
     threads: 1
-    singularity: "docker://evolbioinfo/bdpn:v0.1.14"
-    shell:
-        """
-        python3 py/likelihood_stats.py --likelihoods_est {input.lk} --likelihoods_real {input.lk_real} --log {output.stats}
-        """
-
-rule CI_stats:
-    '''
-    Calculate CI stats for estimated parameters.
-    '''
-    input:
-        tab = os.path.join(sim_folder, '{model}', 'estimates.tab'),
-    output:
-        stats = os.path.join(sim_folder, '{model}', 'CI_stats.txt'),
-    params:
-        mem = 2000,
-        name = 'CIs',
-        qos = 'fast',
-    threads: 1
     singularity: "docker://evolbioinfo/python-evol:v3.6richer.2"
     shell:
         """
-        python3 py/assess_CIs.py --estimates {input.tab} --log {output.stats}
+        python3 py/plot_error_bars_all.py --estimates {input.tab} --pdf {output.pdf} 
         """
-
-rule combine_estimates:
-    '''
-    Combine estimates.
-    '''
-    input:
-        log = expand(os.path.join(sim_folder, '{{model}}', 'tree.{i}.log'), i=REPETITIONS),
-        est_p = expand(os.path.join(sim_folder, '{{model}}', 'tree.{i}.p.est_bdpn'), i=REPETITIONS),
-        # est_psi = expand(os.path.join(sim_folder, '{{model}}', 'tree.{i}.psi.est_bdpn'), i=REPETITIONS),
-        # est_la = expand(os.path.join(sim_folder, '{{model}}', 'tree.{i}.la.est_bdpn'), i=REPETITIONS),
-        est_p_bd = expand(os.path.join(sim_folder, '{{model}}', 'tree.{i}.p.est_bd'), i=REPETITIONS),
-        # est_psi_bd = expand(os.path.join(sim_folder, '{{model}}', 'tree.{i}.psi.est_bd'), i=REPETITIONS),
-        # est_la_bd = expand(os.path.join(sim_folder, '{{model}}', 'tree.{i}.la.est_bd'), i=REPETITIONS),
-    output:
-        tab = os.path.join(sim_folder, '{model}', 'estimates.tab'),
-    params:
-        mem = 2000,
-        name = 'estimates',
-        qos = 'fast',
-    threads: 1
-    singularity: "docker://evolbioinfo/python-evol:v3.6richer.2"
-    shell:
-        """
-        python3 py/summary_table.py --real {input.log} \
-        --estimated_p {input.est_p} \
-        --estimated_p_bd {input.est_p_bd} \
-        --tab {output.tab}
-        """
-        # --estimated_psi_bd {input.est_psi_bd} \
-        # --estimated_psi {input.est_psi} \
-        # --estimated_la {input.est_la} \
-        # --estimated_la_bd {input.est_la_bd} \
 
 rule plot_errors:
     '''
     Plots the errors.
     '''
     input:
-        tab = os.path.join(sim_folder, '{model}', 'estimates.tab'),
+        tab = os.path.join(folder, '{model}', 'estimates.tab'),
     output:
-        pdf = os.path.join(sim_folder, '{model}', 'errors_{p}.svg'),
-        tab = os.path.join(sim_folder, '{model}', 'errors_{p}.tab'),
+        pdf = os.path.join(folder, '{model}', 'errors.svg'),
+        tab = os.path.join(folder, '{model}', 'errors.tab'),
     params:
         mem = 2000,
         name = 'errors',
@@ -227,27 +56,5 @@ rule plot_errors:
     singularity: "docker://evolbioinfo/python-evol:v3.6richer.2"
     shell:
         """
-        echo "python3 py/plot_error.py --estimates {input.tab} --tab {output.tab} --pdf {output.pdf} --fixed {wildcards.p}"
-        python3 py/plot_error.py --estimates {input.tab} --tab {output.tab} --pdf {output.pdf} --fixed {wildcards.p}
-        """
-
-
-rule plot_error_boths:
-    '''
-    Plots the errors.
-    '''
-    input:
-        tab1 = os.path.join(sim_folder, 'BDPN', 'estimates.tab'),
-        tab2 = os.path.join(sim_folder, 'BD', 'estimates.tab'),
-    output:
-        pdf = os.path.join(sim_folder, 'errors_{p}.svg'),
-    params:
-        mem = 2000,
-        name = 'errors',
-        qos = 'fast'
-    threads: 1
-    singularity: "docker://evolbioinfo/python-evol:v3.6richer.2"
-    shell:
-        """
-        python3 py/plot_error_both.py --estimates_bdpn {input.tab1} --estimates_bd {input.tab2} --pdf {output.pdf} --fixed {wildcards.p}
+        python3 py/plot_error.py --estimates {input.tab} --tab {output.tab} --pdf {output.pdf}  --only_trees
         """

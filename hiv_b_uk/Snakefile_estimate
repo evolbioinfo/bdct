@@ -4,7 +4,7 @@ import os
 # snakemake --snakefile Snakefile_estimate --keep-going --cores 7 --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
 
 # To run on maestro:
-# source ~/.bashrc && conda activate snakemake && module load apptainer && cd /pasteur/zeus/projets/p01/Evolbioinfo/users/azhukova/projects/bdpn/hiv_b_uk
+# source ~/.bashrc && conda activate snakemake && module load apptainer && cd /pasteur/zeus/projets/p01/Evolbioinfo/users/azhukova/projects/bdct/hiv_b_uk
 # snakemake --snakefile Snakefile_estimate --keep-going --cores 1 --use-singularity --singularity-prefix $HOME/.singularity --singularity-args "-B /pasteur" --cluster "sbatch -c {threads} -o logs/{params.name}.log -e logs/{params.name}.log --mem {params.mem} -p common --qos={params.qos}  -A bioevo -J {params.name}" --jobs 300
 
 
@@ -18,28 +18,28 @@ REPETITIONS = list(range(n))
 
 rule all:
     input:
-        expand(os.path.join(data_dir, 'estimates_{model}.tab'), model=['bd', 'bdpn']),
+        expand(os.path.join(data_dir, 'estimates_{model}.tab'), model=['bd', 'bdct']),
         expand(os.path.join(data_dir, 'forest.{min_date}_{max_date}.{i}.cherry_test'), i=REPETITIONS, min_date=[2012], max_date=[2015]),
         expand(os.path.join(data_dir, 'likelihood_stats.{min_date}_{max_date}.p={p}.txt'), min_date=[2012], max_date=[2015], p=[0.58])
 
 
-rule estimate_params_p_fixed_bdpn:
+rule estimate_params_p_fixed_bdct:
     '''
     Estimate parameters.
     '''
     input:
         nwk = os.path.join(data_dir, '{forest}.nwk')
     output:
-        est = os.path.join(data_dir, '{forest}.p={p}.est_bdpn')
+        est = os.path.join(data_dir, '{forest}.p={p}.est_bdct')
     params:
         mem = 2000,
         name = 'est_p',
         qos = 'fast'
     threads: 1
-    singularity: "docker://evolbioinfo/bdpn:v0.1.14"
+    singularity: "docker://evolbioinfo/bdct:v0.1.23"
     shell:
         """
-        bdpn_infer --p {wildcards.p}  --nwk {input.nwk} --log {output.est} --ci
+        bdct_infer --p {wildcards.p}  --nwk {input.nwk} --log {output.est} --ci
         """
 
 rule estimate_params_p_fixed_bd:
@@ -55,7 +55,7 @@ rule estimate_params_p_fixed_bd:
         name = 'est_p',
         qos = 'fast'
     threads: 1
-    singularity: "docker://evolbioinfo/bdpn:v0.1.14"
+    singularity: "docker://evolbioinfo/bdct:v0.1.23"
     shell:
         """
         bd_infer --p {wildcards.p}  --nwk {input.nwk} --log {output.est} --ci
@@ -76,7 +76,7 @@ rule likelihood_bd:
         name='lk_bd',
         qos='fast',
     threads: 1
-    singularity: "docker://evolbioinfo/bdpn:v0.1.14"
+    singularity: "docker://evolbioinfo/bdct:v0.1.23"
     shell:
         """
         R=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $2 }}'`
@@ -89,33 +89,33 @@ rule likelihood_bd:
         """
 
 
-rule likelihood_bdpn:
+rule likelihood_bdct:
     '''
     Calculate likelihood value for estimated parameters.
     '''
     input:
-        log = os.path.join(data_dir, '{forest}.p={p}.est_bdpn'),
+        log = os.path.join(data_dir, '{forest}.p={p}.est_bdct'),
         nwk = os.path.join(data_dir, '{forest}.nwk')
     output:
-        lk=os.path.join(data_dir, '{forest}.p={p}.lk_bdpn'),
+        lk=os.path.join(data_dir, '{forest}.p={p}.lk_bdct'),
     params:
         mem=2000,
-        name='lk_bdpn',
+        name='lk_bdct',
         qos='fast',
     threads: 1
-    singularity: "docker://evolbioinfo/bdpn:v0.1.14"
+    singularity: "docker://evolbioinfo/bdct:v0.1.23"
     shell:
         """
         R=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $2 }}'`
         it=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $3 }}'`
         p=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $4 }}'`
-        pn=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $5 }}'`
+        ups=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $5 }}'`
         rt=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $6 }}'`
         psi=`echo "print(1/${{it}})" | python3`
         phi=`echo "print(1/${{rt}})" | python3`
         la=`echo "print($R*${{psi}})" | python3`
 
-        bdpn_loglikelihood --nwk {input.nwk} --la ${{la}} --psi ${{psi}} --p $p --upsilon ${{pn}} --phi ${{phi}} > {output.lk}
+        bdct_loglikelihood --nwk {input.nwk} --la ${{la}} --psi ${{psi}} --p $p --upsilon ${{ups}} --phi ${{phi}} > {output.lk}
         """
 
 rule likelihood_stats:
@@ -124,7 +124,7 @@ rule likelihood_stats:
     '''
     input:
         lk_bd = expand(os.path.join(data_dir, 'forest.{{min_date}}_{{max_date}}.{i}.p={{p}}.lk_bd'), i=REPETITIONS),
-        lk_bdpn = expand(os.path.join(data_dir, 'forest.{{min_date}}_{{max_date}}.{i}.p={{p}}.lk_bdpn'), i=REPETITIONS),
+        lk_bdct = expand(os.path.join(data_dir, 'forest.{{min_date}}_{{max_date}}.{i}.p={{p}}.lk_bdct'), i=REPETITIONS),
     output:
         stats = os.path.join(data_dir, 'likelihood_stats.{min_date}_{max_date}.p={p}.txt'),
     params:
@@ -132,16 +132,16 @@ rule likelihood_stats:
         name = 'likelihoods',
         qos = 'fast'
     threads: 1
-    singularity: "docker://evolbioinfo/bdpn:v0.1.14"
+    singularity: "docker://evolbioinfo/bdct:v0.1.23"
     shell:
         """
-        python3 py/likelihood_stats.py --likelihoods_bd {input.lk_bd} --likelihoods_bdpn {input.lk_bdpn} --log {output.stats}
+        python3 py/likelihood_stats.py --likelihoods_bd {input.lk_bd} --likelihoods_bdct {input.lk_bdct} --log {output.stats}
         """
 
 
 rule cherry_test:
     '''
-    PN-test on a given tree.
+    CT-test on a given tree.
     '''
     input:
         nwk = os.path.join(data_dir, '{forest}.nwk')
@@ -149,27 +149,27 @@ rule cherry_test:
         log = os.path.join(data_dir, '{forest}.cherry_test')
     params:
         mem=2000,
-        name='pn_test',
+        name='ct_test',
         qos='fast'
     threads: 1
-    singularity: "docker://evolbioinfo/bdpn:v0.1.14"
+    singularity: "docker://evolbioinfo/bdct:v0.1.23"
     shell:
         """
-        pn_test --nwk {input.nwk} --log {output.log}
+        ct_test --nwk {input.nwk} --log {output.log}
         """
 
 
-rule combine_estimates_bdpn:
+rule combine_estimates_bdct:
     '''
     Combine estimates.
     '''
     input:
         nwk = expand(os.path.join(data_dir, 'forest.{min_date}_{max_date}.{i}.nwk'), i=REPETITIONS,
             min_date=[2012], max_date=[2015]),
-        est = expand(os.path.join(data_dir, 'forest.{min_date}_{max_date}.{i}.p={p}.est_bdpn'), i=REPETITIONS,
+        est = expand(os.path.join(data_dir, 'forest.{min_date}_{max_date}.{i}.p={p}.est_bdct'), i=REPETITIONS,
             p=[0.58], min_date=[2012], max_date=[2015]),
     output:
-        tab = os.path.join(data_dir, 'estimates_bdpn.tab'),
+        tab = os.path.join(data_dir, 'estimates_bdct.tab'),
     params:
         mem = 2000,
         name = 'estimates',

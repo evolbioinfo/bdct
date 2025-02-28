@@ -3,18 +3,141 @@ from multiprocessing.pool import ThreadPool
 
 import numpy as np
 
-from bdpn import bd_model
-from bdpn.formulas import get_log_p, get_c1, get_c2, get_E, get_log_ppb, get_log_pn, get_log_ppb_from_p_pn, \
-    get_u, get_log_no_event, get_log_ppa, get_log_ppa_from_ppb, get_log_pb, log_subtraction, log_sum
-from bdpn.parameter_estimator import optimize_likelihood_params, estimate_cis
-from bdpn.tree_manager import TIME, read_forest, annotate_forest_with_time, get_T, preannotate_notifiers, NOTIFIERS
+from bdct import bd_model
+from bdct.bd_model import LA, PSI, RHO, REPRODUCTIVE_NUMBER, INFECTIOUS_TIME, SAMPLING_PROBABILITY, TRANSMISSION_RATE, \
+    REMOVAL_RATE
+from bdct.formulas import get_log_p, get_c1, get_c2, get_E, get_log_ppb, get_log_pn, get_log_ppb_from_p_pn, \
+    get_u, get_log_no_event, get_log_ppa, get_log_ppa_from_ppb, get_log_pb, log_subtraction, log_sum, \
+    prob_event1_before_other_events
+from bdct.parameter_estimator import optimize_likelihood_params, estimate_cis
+from bdct.tree_manager import TIME, read_forest, annotate_forest_with_time, get_T, preannotate_notifiers, NOTIFIERS
 
-PARAMETER_NAMES = np.array(['la', 'psi', 'phi', 'rho', 'upsilon'])
+NOTIFIED_SAMPLING_RATE = 'notified sampling rate'
+
+REMOVAL_TIME_AFTER_NOTIFICATION = 'removal time after notification'
+
+CT_PROBABILITY = 'contact tracing probability'
+
+UPSILON = 'upsilon'
+PHI = 'phi'
+
+PARAMETER_NAMES = np.array([LA, PSI, PHI, RHO, UPSILON])
+EPI_PARAMETER_NAMES = np.array([REPRODUCTIVE_NUMBER, INFECTIOUS_TIME, REMOVAL_TIME_AFTER_NOTIFICATION])
 
 DEFAULT_LOWER_BOUNDS = [bd_model.DEFAULT_MIN_RATE, bd_model.DEFAULT_MIN_RATE, bd_model.DEFAULT_MIN_RATE,
-                        bd_model.DEFAULT_MIN_PROB, 0]
-DEFAULT_UPPER_BOUNDS = [bd_model.DEFAULT_MAX_RATE, bd_model.DEFAULT_MAX_RATE, bd_model.DEFAULT_MAX_RATE * 1e3,
+                        bd_model.DEFAULT_MIN_PROB, bd_model.DEFAULT_MIN_PROB]
+DEFAULT_UPPER_BOUNDS = [bd_model.DEFAULT_MAX_RATE, bd_model.DEFAULT_MAX_RATE, bd_model.DEFAULT_MAX_RATE * 500,
                         bd_model.DEFAULT_MAX_PROB, bd_model.DEFAULT_MAX_PROB]
+
+import numpy as np
+
+
+def prob_contact_k_not_removed(la, psi, phi, k=1, index_notified=False, contact_notified=False):
+    """
+    Approximates the probability that by the time the index gets removed,
+    their k-th most recent contact is not yet removed.
+
+    :param la: transmission rate
+    :param psi: standard removal rate
+    :param phi: notified sampling rate
+    :param k: which contact to consider (k=1 is the most recent, k=2 is the second most recent, etc.)
+    :param index_notified: whether the index is in a notified state
+        (we assume here that the index has been in this state since the transmission between them and the contact)
+    :param contact_notified: whether the contact is in a notified state
+        (we assume here that the contact has been in this state since the transmission between them and the index)
+    :return: probability described above
+    """
+    if k <= 0:
+        return 1
+    return (np.power(prob_event1_before_other_events(la, phi if index_notified else psi,
+                                                phi if contact_notified else psi), k - 1)
+            * prob_event1_before_other_events(phi if index_notified else psi, phi if contact_notified else psi))
+
+
+def prob_contact_till_k_not_removed(la, psi, phi, k=1, index_notified=False, contact_notified=False):
+    """
+    Approximates the probability that by the time the index gets removed,
+    at least one of their k most recent contacts is not yet removed.
+
+    :param la: transmission rate
+    :param psi: standard removal rate
+    :param phi: notified sampling rate
+    :param k: how many most recent contacts to consider
+    :param index_notified: whether the index is in a notified state
+        (we assume here that the index has been in this state since the transmission between them
+        and the oldest of k contacts)
+    :param contact_notified: whether the contacts are in a notified state
+        (we assume here that the contact has been in this state since the transmission between them
+        and the oldest of k contacts)
+    :return: probability described above
+    """
+    if k <= 0:
+        return 1
+    prob_index_removed_before = \
+        prob_event1_before_other_events(phi if index_notified else psi, phi if contact_notified else psi)
+    if k == 1:
+        return prob_index_removed_before
+
+    prob_transmitted_before_removals = \
+        prob_event1_before_other_events(la, phi if index_notified else psi, phi if contact_notified else psi)
+    probs = [prob_index_removed_before]
+
+    for i in range(1, k):
+        probs.append(max(0, probs[-1] * prob_transmitted_before_removals))
+        if probs[-1] <= 0:
+            break
+
+    return sum(probs)
+
+
+def get_pis(la, psi, phi, rho, upsilon, kappa=1):
+    """
+    Approximates equilibrium frequencies of non-notified and notified individuals under BDCT(kappa) model.
+
+    :param la: transmission rate
+    :param psi: standard removal rate
+    :param phi: notified sampling rate
+    :param rho: sampling probability
+    :param upsilon: contact tracing probability
+    :param kappa: number of most recent contacts that can be notified
+    :return: equilibrium frequencies
+    """
+    contacts_of_infected_not_removed = \
+        prob_contact_till_k_not_removed(la, psi, phi, k=kappa, index_notified=False, contact_notified=False)
+    contacts_of_notified_not_removed = \
+        prob_contact_till_k_not_removed(la, psi, phi, k=kappa, index_notified=True, contact_notified=False)
+
+    infected_got_sampled_and_notified_infected_non_removed_contacts = psi * rho * upsilon * contacts_of_infected_not_removed
+    notified_got_sampled_and_notified_infected_non_removed_contacts = phi * upsilon * contacts_of_notified_not_removed
+    a = (psi - phi - infected_got_sampled_and_notified_infected_non_removed_contacts
+         + notified_got_sampled_and_notified_infected_non_removed_contacts)
+    b = (la - psi + phi + 2 * infected_got_sampled_and_notified_infected_non_removed_contacts
+         - notified_got_sampled_and_notified_infected_non_removed_contacts)
+    c = -infected_got_sampled_and_notified_infected_non_removed_contacts
+
+    pi_c = next((pi_c for pi_c in np.roots([a, b, c]) if 0 <= pi_c <= 1), 0)
+    return np.array([1 - pi_c, pi_c])
+
+
+def rates2epi(params):
+    """
+    Transforms [la, psi, phi, rho, ups] to [Re, d_infectious, d_notified, rho, upsilon]
+
+    :param params:
+    :return:
+    """
+    la, psi, phi, rho, ups = params
+    return np.array([la / psi, 1 / psi, 1 / phi, rho, ups])
+
+def epi2rates(params):
+    """
+    Transforms [Re, d_infectious, d_notified, upsilon] to [la, psi, phi, ups]
+
+    :param params:
+    :return:
+    """
+    Re, d_i, d_n, rho, ups = params
+    return np.array([Re / d_i, 1 / d_i, 1 / d_n, rho, ups])
 
 
 def preprocess_node(params):
@@ -308,42 +431,47 @@ def loglikelihood(forest, la, psi, phi, rho, upsilon, T, threads=1):
 def save_results(vs, cis, log, ci=False):
     os.makedirs(os.path.dirname(os.path.abspath(log)), exist_ok=True)
     with open(log, 'w+') as f:
-        f.write(',{}\n'.format(','.join(['R0', 'infectious time', 'sampling probability', 'notification probability',
-                                         'removal time after notification',
-                                         'transmission rate', 'removal rate', 'partner removal rate'])))
+        label_line = \
+            ','.join([REPRODUCTIVE_NUMBER, INFECTIOUS_TIME, SAMPLING_PROBABILITY,
+                      CT_PROBABILITY, REMOVAL_TIME_AFTER_NOTIFICATION,
+                      TRANSMISSION_RATE, REMOVAL_RATE, NOTIFIED_SAMPLING_RATE])
+        f.write(f",{label_line}\n")
         la, psi, phi, rho, rho_p = vs
         R0 = la / psi
         rt = 1 / psi
         prt = 1 / phi
-        f.write('value,{}\n'.format(','.join(str(_) for _ in [R0, rt, rho, rho_p, prt, la, psi, phi])))
+        value_line = ",".join(f'{_:g}' for _ in [R0, rt, rho, rho_p, prt, la, psi, phi])
+        f.write(f"value,{value_line}\n")
         if ci:
             (la_min, la_max), (psi_min, psi_max), (psi_p_min, psi_p_max), (rho_min, rho_max), (
                 rho_p_min, rho_p_max) = cis
             R0_min, R0_max = la_min / psi, la_max / psi
             rt_min, rt_max = 1 / psi_max, 1 / psi_min
             prt_min, prt_max = 1 / psi_p_max, 1 / psi_p_min
-            f.write('CI_min,{}\n'.format(
-                ','.join(str(_) for _ in [R0_min, rt_min, rho_min, rho_p_min, prt_min, la_min, psi_min, psi_p_min])))
-            f.write('CI_max,{}\n'.format(
-                ','.join(str(_) for _ in [R0_max, rt_max, rho_max, rho_p_max, prt_max, la_max, psi_max, psi_p_max])))
+            ci_min_line = ",".join(f'{_:g}' for _ in [R0_min, rt_min, rho_min, rho_p_min, prt_min,
+                                                      la_min, psi_min, psi_p_min])
+            f.write(f"CI_min,{ci_min_line}\n")
+            ci_max_line = ",".join(f'{_:g}' for _ in [R0_max, rt_max, rho_max, rho_p_max, prt_max,
+                                                      la_max, psi_max, psi_p_max])
+            f.write(f"CI_max,{ci_max_line}\n")
 
 
 def main():
     """
-    Entry point for tree parameter estimation with the BDPN model with command-line arguments.
+    Entry point for tree parameter estimation with the BDCT(1) model with command-line arguments.
     :return: void
     """
     import argparse
 
     parser = \
-        argparse.ArgumentParser(description="Estimated BDPN parameters.")
+        argparse.ArgumentParser(description="Estimates BDCT(1) parameters for a given tree/forest.")
     parser.add_argument('--la', required=False, default=None, type=float, help="transmission rate")
     parser.add_argument('--psi', required=False, default=None, type=float, help="removal rate")
     parser.add_argument('--p', required=False, default=None, type=float, help='sampling probability')
-    parser.add_argument('--upsilon', required=False, default=None, type=float, help='notification probability')
-    parser.add_argument('--phi', required=False, default=None, type=float, help='partner removal rate')
+    parser.add_argument('--upsilon', required=False, default=None, type=float, help='contact tracing probability')
+    parser.add_argument('--phi', required=False, default=None, type=float, help='notified sampling rate')
     parser.add_argument('--log', required=True, type=str, help="output log file")
-    parser.add_argument('--nwk', required=True, type=str, help="input tree file")
+    parser.add_argument('--nwk', required=True, type=str, help="input tree/forest file")
     parser.add_argument('--upper_bounds', required=False, type=float, nargs=5,
                         help="upper bounds for parameters (la, psi, phi, p, upsilon)", default=DEFAULT_UPPER_BOUNDS)
     parser.add_argument('--lower_bounds', required=False, type=float, nargs=5,
@@ -368,18 +496,18 @@ def main():
 
 def loglikelihood_main():
     """
-    Entry point for tree likelihood estimation with the BDPN model with command-line arguments.
+    Entry point for tree likelihood estimation with the BDCT(1) model with command-line arguments.
     :return: void
     """
     import argparse
 
     parser = \
-        argparse.ArgumentParser(description="Calculate BDPN likelihood on a given forest for given parameter values.")
+        argparse.ArgumentParser(description="Calculate BDCT(1) likelihood on a given tree/forest for given parameter values.")
     parser.add_argument('--la', required=True, type=float, help="transmission rate")
     parser.add_argument('--psi', required=True, type=float, help="removal rate")
     parser.add_argument('--p', required=True, type=float, help='sampling probability')
-    parser.add_argument('--upsilon', required=True, type=float, help='notification probability')
-    parser.add_argument('--phi', required=True, type=float, help='partner removal rate')
+    parser.add_argument('--upsilon', required=True, type=float, help='contact tracing probability')
+    parser.add_argument('--phi', required=True, type=float, help='notified sampling rate')
     parser.add_argument('--nwk', required=True, type=str, help="input tree file")
     params = parser.parse_args()
 
@@ -390,17 +518,30 @@ def loglikelihood_main():
     print(lk)
 
 
+def format_parameters(la, psi, phi, rho, upsilon, fixed=None, epi=True):
+    names = np.concatenate([PARAMETER_NAMES, EPI_PARAMETER_NAMES]) if epi else PARAMETER_NAMES
+    params = [la, psi, phi, rho, upsilon, la / psi, 1 / psi, 1 / phi] if epi else [la, psi, phi, rho, upsilon]
+    if fixed is None:
+        return ', '.join('{}={:.6f}'.format(*_)
+                         for _ in zip(names, params))
+    else:
+        if epi:
+            fixed = np.concatenate([fixed, [fixed[0] and fixed[1], fixed[1], fixed[2]]])
+        return ', '.join('{}={:.6f}{}'.format(_[0], _[1], '' if _[2] is None else ' (fixed)')
+                         for _ in zip(names, params, fixed))
+
+
 def infer(forest, T, la=None, psi=None, phi=None, p=None, upsilon=None,
           lower_bounds=DEFAULT_LOWER_BOUNDS, upper_bounds=DEFAULT_UPPER_BOUNDS, ci=False, threads=1, **kwargs):
     """
-    Infers BDPN model parameters from a given forest.
+    Infers BDCT(1) model parameters from a given tree/forest.
 
     :param forest: list of one or more trees
     :param la: transmission rate
     :param psi: removal rate
-    :param phi: partner removal rate
+    :param phi: notified sampling rate
     :param p: sampling probability
-    :param upsilon: partner notification probability
+    :param upsilon: contact tracing probability
     :param lower_bounds: array of lower bounds for parameter values (la, psi, phi, p, upsilon)
     :param upper_bounds: array of upper bounds for parameter values (la, psi, phi, p, upsilon)
     :param ci: whether to calculate the CIs or not
@@ -424,35 +565,35 @@ def infer(forest, T, la=None, psi=None, phi=None, p=None, upsilon=None,
     bounds[:, 0] = lower_bounds
     bounds[:, 1] = upper_bounds
 
+    print('Picking starting parameters with BD model...')
     input_params = np.array([la, psi, phi, p, upsilon])
     vs, _ = bd_model.infer(forest, T=T, la=la, psi=psi, p=p,
-                           lower_bounds=bounds[[0, 1, 3], 0], upper_bounds=bounds[[0, 1, 3], 1], ci=False)
+                           lower_bounds=bounds[[0, 1, 3], 0], upper_bounds=bounds[[0, 1, 3], 1], ci=False, num_attemps=1)
     vs_extended = np.array([vs[0], vs[1],
-                            np.random.uniform(bounds[2, 0], bounds[2, 1], 1)[0] if phi is None else phi,
-                            vs[-1], 0])
+                            min(max(vs[1] if phi is None or phi < 0 else phi, lower_bounds[2]), upper_bounds[2]),
+                            vs[-1],
+                            lower_bounds[-1] if upsilon is None or upsilon < 0 or upsilon > 1 else upsilon])
     if upsilon == 0:
+        vs_extended[-1] = 0
         best_vs, best_lk = vs_extended, bd_model.loglikelihood(forest, *vs, T, threads)
     else:
-        upsilon_estimated = upsilon is None or upsilon < 0 or upsilon > 1
-        if upsilon_estimated and phi is None and lower_bounds[-1] == 0:
-            best_vs, best_lk = vs_extended, bd_model.loglikelihood(forest, *vs, T, threads)
-        else:
-            best_vs, best_lk = None, -np.inf
-        start_la, start_psi, start_rho = vs
-        start_phi = min(max(start_psi * 1.25, lower_bounds[2]), upper_bounds[2]) \
-            if phi is None or phi < 0 else phi
-        start_ups = 0.1 if upsilon_estimated else upsilon
-        # for ups in (0.1, 0.5) if upsilon_estimated else (upsilon,):
-        start_parameters = np.array([start_la, start_psi, start_phi, start_rho, start_ups])
-        print('Starting BDPN parameters:\t{}'
-              .format(', '.join('{}={:g}{}'.format(_[0], _[1], '' if _[2] is None else ' (fixed)')
-                                for _ in zip(PARAMETER_NAMES, start_parameters, input_params))))
+        best_vs, best_lk = vs_extended, loglikelihood(forest, *vs_extended, T, threads)
+        start_parameters = np.array(vs_extended)
+
+        start_parameters[2] = min(max(vs[1] * 1.25 if phi is None or phi < 0 else phi, lower_bounds[2]), upper_bounds[2])
+        start_parameters[-1] = min(max(0.1 if upsilon is None or upsilon < 0 or upsilon > 1 else upsilon, lower_bounds[-1]),
+                                   upper_bounds[-1])
+
+        print('\nOptimizing BDCT(1) parameters...')
+        print(f'Lower bounds are set to:\t{format_parameters(*lower_bounds, epi=False)}')
+        print(f'Upper bounds are set to:\t{format_parameters(*upper_bounds, epi=False)}\n')
+        print(f'Starting BDCT(1) parameters:\t{format_parameters(*start_parameters, fixed=input_params)}\tloglikelihood={best_lk}')
         vs, lk = optimize_likelihood_params(forest, T=T, input_parameters=input_params,
                                             loglikelihood_function=loglikelihood, bounds=bounds,
-                                            start_parameters=start_parameters, threads=threads)
-        print(
-            'Estimated BDPN parameters:\t{};\tloglikelihood={}'
-            .format((', '.join('{}={:g}'.format(*_) for _ in zip(PARAMETER_NAMES, vs))), lk))
+                                            start_parameters=start_parameters, threads=threads,
+                                            formatter=lambda _: format_parameters(*_), num_attemps=1)
+
+        print(f'Estimated BDCT(1) parameters:\t{format_parameters(*vs)};\tloglikelihood={lk}')
 
         if lk > best_lk:
             best_lk = lk
@@ -460,8 +601,9 @@ def infer(forest, T, la=None, psi=None, phi=None, p=None, upsilon=None,
     if ci:
         cis = estimate_cis(T, forest, input_parameters=input_params, loglikelihood_function=loglikelihood,
                            optimised_parameters=best_vs, bounds=bounds, threads=threads)
-        print('Estimated CIs:\t{}'
-              .format(', '.join('{}=[{:g},{:g}]'.format(p, *p_ci) for (p, p_ci) in zip(PARAMETER_NAMES, cis))))
+                           # parameter_transformers=(rates2epi, epi2rates))
+        print(f'Estimated CIs:\n\tlower:\t{format_parameters(*cis[:,0], epi=False)}\n'
+              f'\tupper:\t{format_parameters(*cis[:,1], epi=False)}')
     else:
         cis = None
     return best_vs, cis

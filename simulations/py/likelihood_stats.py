@@ -23,15 +23,15 @@ if __name__ == "__main__":
         if np.round(lk_real - lk_est, 0) > 0:
             n_lower += 1
             print(lk_est, lk_real, lk_est_file, lk_real_file)
-    log = 'Estimated likelihood\t is higher than real\t in {:.1f}% of cases' \
-        .format(100 * n_higher / n)
+    log = f'Estimated likelihood\t is higher than real\t in {100 * n_higher / n:.1f}% of cases'
     n_equal = n - n_higher - n_lower
-    log += '\n\t is equal to real\t in {:.1f}% of cases' \
-        .format(100 * n_equal / n)
-    log += '\n\t is lower than real\t in {:.1f}% of cases' \
-        .format(100 * n_lower / n)
+    log += f'\n\t is equal to real\t in {100 * n_equal / n:.1f}% of cases'
+    log += f'\n\t is lower than real\t in {100 * n_lower / n:.1f}% of cases'
 
-    p = binomtest(min(n_higher, n_lower), n_higher + n_lower, 0.5, alternative='two-sided').pvalue
-    log += '\n\t is different from real\t with a p-value of {:g}'.format(p)
+    if n > 0 and n_higher == n_lower == 0:
+        log += '\n\t is the same as real\t in all cases'
+    else:
+        p = binomtest(min(n_higher, n_lower), n_higher + n_lower, 0.5, alternative='two-sided').pvalue
+        log += f'\n\t is different from real\t with a p-value of {p:g}'
     print(log)
     open(params.log, 'w+').write(log + '\n')

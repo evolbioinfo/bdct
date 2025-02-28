@@ -125,23 +125,38 @@ def read_forest(tree_path):
             return roots
     except:
         pass
-    with open(tree_path, 'r') as f:
-        nwks = f.read().replace('\n', '').split(';')
+    if os.path.exists(tree_path):
+        with open(tree_path, 'r') as f:
+            nwks = f.read().replace('\n', '').split(';')
+    else:
+        try:
+            nwks = tree_path.replace('\n', '').split(';')
+        except:
+            pass
     if not nwks:
         raise ValueError('Could not find any trees (in newick or nexus format) in the file {}.'.format(tree_path))
     return [read_tree(nwk + ';') for nwk in nwks[:-1]]
 
 
-def annotate_tree(tree):
+def annotate_tree_with_time(tree, start_time=0):
     for n in tree.traverse('preorder'):
-        p_time = 0 if n.is_root() else getattr(n.up, TIME)
+        p_time = start_time if n.is_root() else getattr(n.up, TIME)
         n.add_feature(TIME, p_time + n.dist)
+    return tree
 
 
-def annotate_forest_with_time(forest):
-    for tree in forest:
+def annotate_forest_with_time(forest, start_times=None):
+    if start_times:
+        if len(start_times) < len(forest):
+            raise ValueError(f'{len(start_times)} start times are specified but the forest contains {len(forest)} trees. '
+                             f'Either specify as many start times as forest trees or set start times to None '
+                             f'(to put all the tree start times at 0)')
+    else:
+        start_times = [0] * len(forest)
+
+    for tree, start_time in zip(forest, start_times):
         if not hasattr(tree, TIME):
-            annotate_tree(tree)
+            annotate_tree_with_time(tree, start_time)
 
 
 def get_T(T, forest):
@@ -150,29 +165,6 @@ def get_T(T, forest):
         for tree in forest:
             T = max(T, max(getattr(_, TIME) for _ in tree))
     return T
-
-
-def sort_tree(tree):
-    """
-    Reorganise the tree in such a way that the oldest tip (with the minimal time) is always on the left.
-    The tree must be time-annotated.
-
-    :param tree:
-    :return:
-    """
-    for n in tree.traverse('postorder'):
-        ot_feature = 'oldest_tip'
-        if n.is_leaf():
-            n.add_feature(ot_feature, getattr(n, TIME))
-            continue
-        c1, c2 = n.children
-        t1, t2 = getattr(c1, ot_feature), getattr(c2, ot_feature)
-        if t1 > t2:
-            n.children = [c2, c1]
-        delattr(c1, ot_feature)
-        delattr(c2, ot_feature)
-        if not n.is_root():
-            n.add_feature(ot_feature, min(t1, t2))
 
 
 def get_total_num_notifiers(tree):
@@ -189,10 +181,10 @@ def get_min_num_notifiers(tree):
     return n
 
 
-
 def preannotate_notifiers(forest):
     """
     Preannotates each tree node with potential notifiers from upper subtree
+
     :param forest: forest of trees to be annotated
     :return: void, adds NOTIFIERS feature to forest tree nodes.
         This feature contains a (potentially empty) set of upper tree notifiers

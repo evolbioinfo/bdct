@@ -1,9 +1,9 @@
-FROM python:3.9-slim
+FROM python:3.10-slim
 
 RUN mkdir /pasteur
 
-# Install bdpn
-RUN cd /usr/local/ && pip3 install --no-cache-dir bdpn==0.1.14
+# Install bdct
+RUN cd /usr/local/ && pip3 install --no-cache-dir bdct==0.1.23
 
-# The entrypoint runs bdpn_infer with command line arguments
-ENTRYPOINT ["bdpn_infer"]
+# The entrypoint runs bdct_infer with command line arguments
+ENTRYPOINT ["bdct_infer"]

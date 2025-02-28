@@ -3,7 +3,7 @@ import logging
 import numpy as np
 import scipy
 
-from bdpn.tree_manager import TIME, read_forest, annotate_forest_with_time
+from bdct.tree_manager import TIME, read_forest, annotate_forest_with_time
 
 DEFAULT_CHERRY_BLOCK_SIZE = 100
 
@@ -14,43 +14,47 @@ RANDOM_REPETITIONS = 1e3
 DEFAULT_PERCENTILE = 0.25
 
 
-class CherryLikeMotif(object):
+class ParentChildrenMotif(object):
 
-    def __init__(self, clustered_tips, root=None):
+    def __init__(self, clustered_children, root=None):
         """
-        A motif with exceptions.
+        A motif that includes the subtree's root and root's children picked according to a certain criterion.
+
         :param root: ete.TreeNode, the root of the motif subtree
-        :param clustered_tips: list of clustered child tips
+        :param clustered_children: list of clustered children
         """
-        self.root = root # if root else clustered_tips[0].get_common_ancestor(*clustered_tips)
-        self.clustered_tips = clustered_tips
+        self.root = root
+        self.clustered_children = clustered_children
 
     def __str__(self):
-        return "Motif with root {} and {} clustered tips ({})" \
-            .format(self.root.name, len(self.clustered_tips), ', '.join(_.name for _ in self.clustered_tips))
+        return (f"Motif with root {self.root.name} and {len(self.clustered_children)} clustered tips: "
+                f"{', '.join(_.name for _ in self.clustered_children)}")
+
+    def __len__(self):
+        return len(self.clustered_children)
+
 
 
 def pick_cherries(tree, include_polytomies=True):
     """
-    Picks cherries that satisfy the given values of pn_lookback, pn_delay in the given tree.
+    Picks cherries in the given tree.
 
-    :param include_polytomies: bool, whether to transform polytomies in the tree into cherries,
-        i.e. a polytomy of n tips will be transformed into n(n-1) cherries.
+    :param include_polytomies: bool, whether to include nodes with > 2 children into consideration.
     :param tree: ete3.Tree, the tree of interest
     :return: iterator of Motif motifs
     """
     for cherry_root in (set(tip.up for tip in tree) if not tree.is_leaf() else set()):
         if not include_polytomies and len(cherry_root.children) != 2:
             continue
-        tips = sorted([_ for _ in cherry_root.children if _.is_leaf()], key=lambda _: _.dist)
+        tips = [_ for _ in cherry_root.children if _.is_leaf()]
         if len(tips) < 2:
             continue
-        yield CherryLikeMotif(clustered_tips=tips, root=cherry_root)
+        yield ParentChildrenMotif(clustered_children=tips, root=cherry_root)
 
 
-def sign_test(forest):
+def ct_test(forest):
     """
-    Tests if the input forest was generated under a -PN model.
+    Tests if the input forest was generated under a -CT model.
 
     The test detects cherries in the forest and sorts them by the times of their roots.
     For each cherry the test calculates the difference between its tip times,
@@ -64,7 +68,7 @@ def sign_test(forest):
     Finally, we calculate the sign test of one by one comparison of real vs reshuffled diffs
     (-1 if the difference for the i-th cherry is smaller in the real array, 1 if larger, 0 is the same).
 
-    The test therefore reports a probability of partner notification
+    The test therefore reports a probability of contact tracing
     being present in the tree.
 
     :param forest: list of trees
@@ -74,44 +78,44 @@ def sign_test(forest):
 
     all_cherries = []
     for tree in forest:
-        all_cherries.extend(pick_cherries(tree, include_polytomies=False))
+        all_cherries.extend(pick_cherries(tree, include_polytomies=True))
     all_cherries = sorted(all_cherries, key=lambda _: getattr(_.root, TIME))
 
     n_cherries = len(all_cherries)
-    logging.info('Picked {} cherries with {} roots.'.format(n_cherries, len({_.root for _ in all_cherries})))
+    logging.info(f'Picked {n_cherries} cherries.')
 
-    def get_diff(b1, b2):
-        return abs(b1.dist - b2.dist)
+    if n_cherries < 2:
+        return 1, n_cherries
 
-    def get_diff_array(cherries):
-        return np.array([get_diff(*cherry.clustered_tips) for cherry in cherries])
+    random_diffs, real_diffs = get_real_vs_reshuffled_diffs(all_cherries)
+    pval = scipy.stats.binomtest((random_diffs < real_diffs).sum(), n=n_cherries, p=0.5, alternative='less').pvalue
 
-    first_tips, other_tips = [], []
-    for cherry in all_cherries:
-        t1, t2 = cherry.clustered_tips
-        if np.random.rand() < 0.5:
-            t2, t1 = t1, t2
-        first_tips.append(t1)
-        other_tips.append(t2)
+    return pval, n_cherries
 
-    reshuffled_cherries = []
-    for i in range(n_cherries):
-        other_tip_i = i + (-1 if i % 2 else 1)
-        if n_cherries % 2 and i >= n_cherries - 3:
-            other_tip_i = (i + 1) if (i < n_cherries - 1) else (i - 2)
-        reshuffled_cherries.append(CherryLikeMotif(clustered_tips=[first_tips[i], other_tips[other_tip_i]]))
 
-    real_diffs, random_diffs = get_diff_array(all_cherries), get_diff_array(reshuffled_cherries)
-    k = (random_diffs < real_diffs).sum()
+def get_real_vs_reshuffled_diffs(all_couples):
+    n_motifs = len(all_couples)
+    first_dists, other_dists = np.zeros(n_motifs, dtype=float), np.zeros(n_motifs, dtype=float)
+    for i, couple in enumerate(all_couples):
+        t1, t2 = np.random.choice(couple.clustered_children, size=2, replace=False)
+        first_dists[i] = t1.dist
+        other_dists[i] = t2.dist
 
-    result = scipy.stats.binomtest(k, n=n_cherries, p=0.5, alternative='less').pvalue
+    if n_motifs > 1:
+        # swap pairs of children
+        reshuffled_other_dists = np.zeros(n_motifs, dtype=float)
+        reshuffled_other_dists[:-1:2] = other_dists[1::2]
+        reshuffled_other_dists[1::2] = other_dists[:-1:2]
+        # if the number of couples is odd, swap the last 3 children in a circle
+        if n_motifs % 2:
+            reshuffled_other_dists[-1] = reshuffled_other_dists[-2]
+            reshuffled_other_dists[-2] = other_dists[-1]
+    else:
+        reshuffled_other_dists = other_dists
 
-    # logging.info(
-    #     'For {n} cherries with roots in [{start}-{stop}), PN test {res}.'
-    #     .format(res=result, start=getattr(all_cherries[0].root, TIME), stop=getattr(all_cherries[-1].root, TIME),
-    #             n=n_cherries))
-
-    return result
+    real_diffs = np.abs(first_dists - other_dists)
+    random_diffs = np.abs(first_dists - reshuffled_other_dists)
+    return random_diffs, real_diffs
 
 
 def cherry_diff_plot(forest, outfile=None):
@@ -136,7 +140,7 @@ def cherry_diff_plot(forest, outfile=None):
         all_cherries.extend(pick_cherries(tree, include_polytomies=False))
 
     def get_diff(cherry):
-        b1, b2 = cherry.clustered_tips
+        b1, b2 = cherry.clustered_children
         return abs(b1.dist - b2.dist)
 
     plt.clf()
@@ -165,15 +169,15 @@ def cherry_diff_plot(forest, outfile=None):
 
 def main():
     """
-    Entry point for PN test with command-line arguments.
+    Entry point for CT test with command-line arguments.
     :return: void
     """
     import argparse
 
     parser = \
-        argparse.ArgumentParser(description="""PN-test.
+        argparse.ArgumentParser(description="""CT-test.
         
-Checks if the input forest was generated under a -PN model.
+Checks if the input forest was generated under a -CT model.
     
 The test detects cherries in the forest and sorts them by the times of their roots. 
 For each cherry the test calculates the difference between its tip times, 
@@ -191,12 +195,13 @@ The test therefore reports a probability of partner notification being present i
     params = parser.parse_args()
 
     forest = read_forest(params.nwk)
-    pval = sign_test(forest)
+    pval, n_cherries = ct_test(forest)
 
-    logging.info("PN test {}.".format(pval))
+    logging.info(f"CT test {pval} on {n_cherries} cherries.")
 
     with open(params.log, 'w+') as f:
-        f.write('PN-test\t{}\n'.format(pval))
+        f.write('CT-test p-value\tnumber of cherries\n')
+        f.write(f'{pval:g}\t{n_cherries}\n')
 
 
 if __name__ == '__main__':

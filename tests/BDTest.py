@@ -1,10 +1,8 @@
 import os
 import unittest
 
-from ete3 import Tree
-
-from bdpn import bd_model
-from bdpn.tree_manager import get_T, annotate_forest_with_time, read_tree, read_forest
+from bdct import bd_model
+from bdct.tree_manager import get_T, annotate_forest_with_time, read_forest
 
 NWK = os.path.join(os.path.dirname(__file__), 'data', 'tree.bd.nwk')
 
