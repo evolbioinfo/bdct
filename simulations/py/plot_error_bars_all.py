@@ -55,7 +55,7 @@ if __name__ == "__main__":
         estimators |= {_ for _ in EST_ORDER if (m.lower() == _.split('ct')[0].replace('dl', '').replace('ml', '') or 'mf' in _)}
     n_estimators = len(estimators)
     n_ct_estimators = len([_ for _ in estimators if 'mf' in _ or 'ct' in _])
-    fig, axes = plt.subplots(n_models, 1, figsize=(0.6 * ((n_params - 2) * n_estimators + 2 * n_ct_estimators) + 0.05 * (n_params + 1), 3 * n_models))
+    fig, axes = plt.subplots(n_models, 1, figsize=(0.2 * ((n_params - 2) * n_estimators + 2 * n_ct_estimators) + 0.05 * (n_params + 1), 3 * n_models))
 
     for ax, estimates in zip(axes, params.estimates):
 

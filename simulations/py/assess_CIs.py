@@ -51,16 +51,20 @@ if __name__ == "__main__":
                     idx = df.loc[mask, :].index
                     n_observations = sum(mask)
                 if n_observations:
+                    min_label = f'{par}_min'
+                    max_label = f'{par}_max'
+                    perc = 100 * sum((np.less_equal(df.loc[mask, min_label], real_df.loc[idx, par])
+                                   | np.less_equal(np.abs(real_df.loc[idx, par] - df.loc[mask, min_label]), 1e-3)) \
+                                  & (np.less_equal(real_df.loc[idx, par], df.loc[mask, max_label])
+                                     | np.less_equal(np.abs(df.loc[mask, max_label] - real_df.loc[idx, par]), 1e-3))) \
+                        / n_observations
                     result_df.loc[f'{data_type}.{par}', f'{estimator_type}.{WITHIN_CI}'] = \
-                        f'{100 * sum((np.less_equal(df.loc[mask, '{}_min'.format(par)], real_df.loc[idx, par])
-                                   | np.less_equal(np.abs(real_df.loc[idx, par] - df.loc[mask, '{}_min'.format(par)]), 1e-3)) \
-                                  & (np.less_equal(real_df.loc[idx, par], df.loc[mask, '{}_max'.format(par)])
-                                     | np.less_equal(np.abs(df.loc[mask, '{}_max'.format(par)] - real_df.loc[idx, par]), 1e-3))) \
-                        / n_observations:.0f}%'
+                        f'{perc:.0f}%'
+                    within_med = (100 * (df.loc[mask, max_label] - df.loc[mask, min_label]) \
+                         / real_df.loc[idx, par]).median()
                     result_df.loc[f'{data_type}.{par}', f'{estimator_type}.{CI_WIDTH_REL}'] = \
-                        f'{(100 * (df.loc[mask, '{}_max'.format(par)] - df.loc[mask, '{}_min'.format(par)]) \
-                         / real_df.loc[idx, par]).median():.1f}%'
+                        f'{within_med:.1f}%'
                     if par in PROBS:
                         result_df.loc[f'{data_type}.{par}', f'{estimator_type}.{CI_WIDTH_ABS}'] = \
-                            f'{(df.loc[mask, '{}_max'.format(par)] - df.loc[mask, '{}_min'.format(par)]).median():.2f}*'
+                            f'{(df.loc[mask, max_label] - df.loc[mask, min_label]).median():.2f}*'
     result_df.to_csv(params.log, sep='\t', index=False)

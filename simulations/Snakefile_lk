@@ -21,8 +21,8 @@ ruleorder: likelihood_real_bd > likelihood_real_bdct
 
 rule all:
     input:
-        expand(os.path.join(folder, 'BDCT{n}', 'likelihood_stats_{estimator}.tree.txt'), n=[0, 1, 2, M], estimator=EST_ML),
-        expand(os.path.join(folder, 'BDCT{n}', 'lk_ratio_tests.tree.tab'), n=[0, 1, 2, M])
+        expand(os.path.join(folder, 'BDCT{n}', 'likelihood_stats_{estimator}.tree.txt'), n=[0, 1, 2, 5, M], estimator=EST_ML),
+        expand(os.path.join(folder, 'BDCT{n}', 'lk_ratio_tests.tree.tab'), n=[0, 1, 2, 5, M])
 
 
 rule likelihood_bdct:
@@ -157,8 +157,8 @@ rule lk_ratio:
     Combine results.
     '''
     input:
-        log_ct = expand(os.path.join(folder, '{{model}}', '{{type}}.{i}.p.lk_bdct'), i=REPETITIONS),
-        log = expand(os.path.join(folder, '{{model}}', '{{type}}.{i}.p.lk_bd'), i=REPETITIONS)
+        log_ct = expand(os.path.join(folder, '{{model}}', '{{type}}.{i}.lk_bdct'), i=REPETITIONS),
+        log = expand(os.path.join(folder, '{{model}}', '{{type}}.{i}.lk_bd'), i=REPETITIONS)
     output:
         tab = os.path.join(folder, '{model}', 'lk_ratio_tests.{type,tree|forest}.tab'),
     params:

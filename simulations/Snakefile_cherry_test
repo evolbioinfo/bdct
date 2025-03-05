@@ -54,7 +54,7 @@ rule combine_ct:
     '''
     input:
         log = expand(os.path.join(folder, '{model}CT{n}', 'tree.{i}.cherry_test'), i=REPETITIONS,
-            n=[0, 1, 2, M], model=MODELS)
+            n=[0, 1, 2, 5, M], model=MODELS)
     output:
         tab = os.path.join(folder, 'cherry_tests.tab'),
     params:

@@ -1,0 +1,4 @@
+Estimated likelihood	 is higher than real	 in 100.0% of cases
+	 is equal to real	 in 0.0% of cases
+	 is lower than real	 in 0.0% of cases
+	 is different from real	 with a p-value of 1.57772e-30

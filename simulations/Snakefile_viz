@@ -12,11 +12,12 @@ os.makedirs('logs', exist_ok=True)
 
 
 folder = config.get("folder", '.')
+M = int(config.get('max', 1000))
 
 
 rule all:
     input:
-        expand(os.path.join(folder, 'BDCT{n}', 'errors.svg'), n=[0, 1, 2, M]),
+        expand(os.path.join(folder, 'BDCT{n}', 'errors.svg'), n=[0, 1, 2, 5, M]),
         os.path.join(folder, 'error_bars.svg')
 
 
@@ -25,7 +26,7 @@ rule plot_error_bars_all:
     Plots the errors.
     '''
     input:
-        tab = expand(os.path.join(folder, 'BDCT{n}', 'estimates.tab'), n=[0, 1, 2, M]),
+        tab = expand(os.path.join(folder, 'BDCT{n}', 'estimates.tab'), n=[0, 1, 2, 5, M]),
     output:
         pdf = os.path.join(folder, 'error_bars.svg'),
     params:

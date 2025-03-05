@@ -18,7 +18,7 @@ par2greek = {'lambda': u'\u03bb', 'psi': u'\u03c8', 'phi': u'\u03c6', 'p': '\u03
              'x': 'x', 'f_ss': 'f_ss', 'f_inc': 'f_i'}
 
 
-EST_ORDER = ['bd', 'bddl', 'bdct1ml', 'bdct1dl', 'bdct2dl', 'bdct2000dl',
+EST_ORDER = ['bd', 'bddl', 'bdct', 'bdct1dl', 'bdct2dl', 'bdct2000dl',
              'bdeidl', 'bdeict1dl', 'bdeict2dl', 'bdeict2000dl',
              'bdssdl', 'bdssct1dl', 'bdssct2dl', 'bdssct2000dl',
              'mfdl']

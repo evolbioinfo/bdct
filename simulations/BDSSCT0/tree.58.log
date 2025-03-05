@@ -1,0 +1,2 @@
+R0,infectious time,sampling probability,superspreading transmission ratio,superspreading fraction,transmission rate normal to normal spreader,transmission rate normal to superspreader,transmission rate super to normal spreader,transmission rate super to superspreader,removal rate,tips,time,hidden_trees
+8.636065792042608,16.10359340982153,0.4587736402167208,2.501176795720404,0.13089524109921477,0.38954146767630626,0.0586685595809203,0.974312079922847,0.14674043986213783,0.06209794140667406,686,20.544431301852327,0

@@ -18,7 +18,7 @@ MODELS = ['BDCT', 'BDEICT', 'BDSSCT']
 rule all:
     input:
         expand(os.path.join(folder, '{model}{n}', 'tree.{i}.nwk'), i=REPETITIONS, \
-            n=[0, 1, 2, M], k=range(0, 100), model=MODELS),
+            n=[0, 1, 2, 5, M], k=range(0, 100), model=MODELS),
     shell:
         """
         snakemake --snakefile Snakefile_estimate --keep-going --cores 12 --config num={num} sf={folder} --unlock 2> /dev/null

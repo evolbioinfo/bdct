@@ -14,13 +14,13 @@ if __name__ == "__main__":
 
     df = pd.DataFrame(columns=['lk', 'lk_CT'])
 
-    for log in params.no_pn:
+    for log in params.no_ct:
         i = int(re.findall(r'[0-9]+', log)[-1])
         with open(log, 'r') as f:
             val = float(f.readline().strip('\n'))
         df.loc[i, 'lk'] = val
 
-    for log in params.pn:
+    for log in params.ct:
         i = int(re.findall(r'[0-9]+', log)[-1])
         with open(log, 'r') as f:
             val = float(f.readline().strip('\n'))
