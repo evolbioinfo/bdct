@@ -1,6 +1,6 @@
 # bdct
 
-Maximum likelihood estimator of BD, BD-CT(1) model parameters from phylogenetic trees and a non-parametric CT detection test. 
+Maximum likelihood estimator of BD and BD-CT(1) model parameters from phylogenetic trees and a non-parametric CT detection test. 
 
 ## Preprint
 
