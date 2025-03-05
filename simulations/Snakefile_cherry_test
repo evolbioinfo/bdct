@@ -41,7 +41,7 @@ rule cherry_test:
         name='ct_{i}',
         qos='fast'
     threads: 1
-    singularity: "docker://evolbioinfo/bdct:v0.1.23"
+    singularity: "docker://evolbioinfo/bdct:v0.1.24"
     shell:
         """
         ct_test --nwk {input.nwk} --log {output.log}

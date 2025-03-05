@@ -36,7 +36,7 @@ rule likelihood_bd:
         name='lk_bd',
         qos='fast',
     threads: 1
-    singularity: "docker://evolbioinfo/bdct:v0.1.23"
+    singularity: "docker://evolbioinfo/bdct:v0.1.24"
     shell:
         """
         R=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $2 }}'`
@@ -63,7 +63,7 @@ rule likelihood_bdct:
         name='lk_bdct',
         qos='fast',
     threads: 1
-    singularity: "docker://evolbioinfo/bdct:v0.1.23"
+    singularity: "docker://evolbioinfo/bdct:v0.1.24"
     shell:
         """
         R=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $2 }}'`
@@ -91,7 +91,7 @@ rule estimate_params_p_fixed_bdct:
         name = 'est_p',
         qos = 'normal'
     threads: 1
-    singularity: "docker://evolbioinfo/bdct:v0.1.23"
+    singularity: "docker://evolbioinfo/bdct:v0.1.24"
     shell:
         """
         bdct_infer --p {wildcards.p}  --nwk {input.nwk} --log {output.est} --ci
@@ -110,7 +110,7 @@ rule estimate_params_p_fixed_bd:
         name = 'est_p',
         qos = 'fast'
     threads: 1
-    singularity: "docker://evolbioinfo/bdct:v0.1.23"
+    singularity: "docker://evolbioinfo/bdct:v0.1.24"
     shell:
         """
         bd_infer --p {wildcards.p}  --nwk {input.nwk} --log {output.est} --ci
@@ -130,7 +130,7 @@ rule cherry_test:
         name='ct_test',
         qos='fast'
     threads: 1
-    singularity: "docker://evolbioinfo/bdct:v0.1.23"
+    singularity: "docker://evolbioinfo/bdct:v0.1.24"
     shell:
         """
         ct_test --nwk {input.nwk} --log {output.log}
