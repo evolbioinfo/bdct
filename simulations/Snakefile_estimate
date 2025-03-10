@@ -25,7 +25,7 @@ M = int(config.get('max', 1000))
 
 rule all:
     input:
-        expand(os.path.join(folder, 'BDCT{n}', 'estimates.tab'), n=[0, 1, 2, 5, M]),
+        expand(os.path.join(folder, 'BDCT{n}', 'estimates.tab'), n=[0, 1, 2, M]),
 
 
 rule estimate_params_bd:
@@ -42,7 +42,7 @@ rule estimate_params_bd:
         name = 'bd{i}',
         qos = 'fast'
     threads: 1
-    singularity: "docker://evolbioinfo/bdct:v0.1.24"
+    singularity: "docker://evolbioinfo/bdct:v0.1.25"
     shell:
         """
         p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
@@ -64,7 +64,7 @@ rule estimate_params_bdct:
         name = 'bd{i}',
         qos = 'fast'
     threads: 1
-    singularity: "docker://evolbioinfo/bdct:v0.1.24"
+    singularity: "docker://evolbioinfo/bdct:v0.1.25"
     shell:
         """
         p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`

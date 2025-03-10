@@ -41,7 +41,7 @@ rule cherry_test:
         name='ct_{i}',
         qos='fast'
     threads: 1
-    singularity: "docker://evolbioinfo/bdct:v0.1.24"
+    singularity: "docker://evolbioinfo/bdct:v0.1.25"
     shell:
         """
         ct_test --nwk {input.nwk} --log {output.log}
@@ -54,7 +54,7 @@ rule combine_ct:
     '''
     input:
         log = expand(os.path.join(folder, '{model}CT{n}', 'tree.{i}.cherry_test'), i=REPETITIONS,
-            n=[0, 1, 2, 5, M], model=MODELS)
+            n=[0, 1, 2, M], model=MODELS)
     output:
         tab = os.path.join(folder, 'cherry_tests.tab'),
     params:

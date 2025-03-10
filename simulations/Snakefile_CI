@@ -17,7 +17,7 @@ M = int(config.get('max', 1000))
 
 rule all:
     input:
-        expand(os.path.join(folder, 'BDCT{n}', 'CI_stats.txt'), n=[0, 1, 2, 5, M]),
+        expand(os.path.join(folder, 'BDCT{n}', 'CI_stats.txt'), n=[0, 1, 2, M]),
 
 
 rule CI_stats:

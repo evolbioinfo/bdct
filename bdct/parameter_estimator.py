@@ -4,10 +4,12 @@ from scipy.stats import chi2
 
 MAX_ATTEMPTS = 25
 
-LIKELIHOOD_DIFF_95_CI = chi2.ppf(q=0.95, df=1) / 2
-
 MIN_VALUE = np.log(np.power(np.finfo(np.float64).eps, 0.5))
 MAX_VALUE = np.log(np.finfo(np.float64).max)
+
+
+def get_chi2_threshold(num_parameters=1):
+    return chi2.ppf(q=0.95, df=num_parameters) / 2
 
 
 def rescale_log(log_array):
@@ -117,12 +119,15 @@ def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_functi
 
 def estimate_cis(T, forest, input_parameters, loglikelihood_function, optimised_parameters, bounds, threads=1,
                  optimise_as_logs=None, parameter_transformers=None):
-    print('Estimating CIs...')
     optimised_cis = np.array(bounds)
     fixed_parameter_mask = input_parameters != None
     optimised_cis[fixed_parameter_mask, 0] = input_parameters[fixed_parameter_mask]
     optimised_cis[fixed_parameter_mask, 1] = input_parameters[fixed_parameter_mask]
-    lk_threshold = loglikelihood_function(forest, *optimised_parameters, T, threads=threads) - LIKELIHOOD_DIFF_95_CI
+
+    n_optimized_params = len(input_parameters[~fixed_parameter_mask])
+    print(f'Estimating CIs for {n_optimized_params} free parameters...')
+    lk_threshold = (loglikelihood_function(forest, *optimised_parameters, T, threads=threads)
+                    - get_chi2_threshold(num_parameters=n_optimized_params))
 
     def binary_search(v_min, v_max, get_lk, lower=True):
         v = v_min + (v_max - v_min) / 2

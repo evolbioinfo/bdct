@@ -18,7 +18,7 @@ setup(
         'Topic :: Software Development',
         'Topic :: Software Development :: Libraries :: Python Modules',
     ],
-    version='0.1.24',
+    version='0.1.25',
     description='Maximum likelihood estimation of BD and BD-CT(1) parameters from phylogenetic trees.',
     author='Anna Zhukova',
     author_email='anna.zhukova@pasteur.fr',

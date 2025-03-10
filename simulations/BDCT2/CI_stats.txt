@@ -1,5 +1,5 @@
 type	parameter	bd.percent_within_CIs	bd.CI_width_relative	bd.CI_width_absolute	bdct.percent_within_CIs	bdct.CI_width_relative	bdct.CI_width_absolute
-tree	lambda	33%	11.7%		83%	10.7%	
-tree	psi	9%	47.5%		49%	37.0%	
-tree	phi				81%	34.5%	
-tree	upsilon				68%	24.6%	0.09*
+tree	lambda	38%	14.5%		97%	16.7%	
+tree	psi	11%	59.2%		63%	56.9%	
+tree	phi				92%	54.4%	
+tree	upsilon				90%	38.4%	0.14*

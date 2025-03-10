@@ -21,8 +21,8 @@ ruleorder: likelihood_real_bd > likelihood_real_bdct
 
 rule all:
     input:
-        expand(os.path.join(folder, 'BDCT{n}', 'likelihood_stats_{estimator}.tree.txt'), n=[0, 1, 2, 5, M], estimator=EST_ML),
-        expand(os.path.join(folder, 'BDCT{n}', 'lk_ratio_tests.tree.tab'), n=[0, 1, 2, 5, M])
+        expand(os.path.join(folder, 'BDCT{n}', 'likelihood_stats_{estimator}.tree.txt'), n=[0, 1, 2, M], estimator=EST_ML),
+        expand(os.path.join(folder, 'BDCT{n}', 'lk_ratio_tests.tree.tab'), n=[0, 1, 2, M])
 
 
 rule likelihood_bdct:
@@ -39,7 +39,7 @@ rule likelihood_bdct:
         name = 'lk_{i}_bdct',
         qos = 'fast',
     threads: 1
-    singularity: "docker://evolbioinfo/bdct:v0.1.24"
+    singularity: "docker://evolbioinfo/bdct:v0.1.25"
     shell:
         """
         #,R0,infectious time,sampling probability,notification probability,removal time after notification,transmission rate,removal rate,partner removal rate
@@ -69,7 +69,7 @@ rule likelihood_real_bdct:
         name = 'lk_{i}_bdct_real',
         qos = 'fast',
     threads: 1
-    singularity: "docker://evolbioinfo/bdct:v0.1.24"
+    singularity: "docker://evolbioinfo/bdct:v0.1.25"
     shell:
         """        
         la=`tail -n 1 {input.log} | awk -F',' '{{ print $4 }}'`
@@ -95,7 +95,7 @@ rule likelihood_bd:
         name='lk_{i}_bdct',
         qos='fast',
     threads: 1
-    singularity: "docker://evolbioinfo/bdct:v0.1.24"
+    singularity: "docker://evolbioinfo/bdct:v0.1.25"
     shell:
         """
         #,R0,infectious time,sampling probability,transmission rate,removal rate
@@ -122,7 +122,7 @@ rule likelihood_real_bd:
         name = 'lk_{i}_bd_real',
         qos = 'fast',
     threads: 1
-    singularity: "docker://evolbioinfo/bdct:v0.1.24"
+    singularity: "docker://evolbioinfo/bdct:v0.1.25"
     shell:
         """
         la=`tail -n 1 {input.log} | awk -F',' '{{ print $4 }}'`
@@ -146,7 +146,7 @@ rule likelihood_stats:
         name = 'likelihoods',
         qos = 'fast'
     threads: 1
-    singularity: "docker://evolbioinfo/bdct:v0.1.24"
+    singularity: "docker://evolbioinfo/bdct:v0.1.25"
     shell:
         """
         python3 py/likelihood_stats.py --likelihoods_est {input.lk} --likelihoods_real {input.lk_real} --log {output.stats}
