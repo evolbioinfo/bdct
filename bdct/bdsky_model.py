@@ -377,6 +377,13 @@ def infer_skyline(forest, T, n_intervals=2, la=None, psi=None, p=None, times=Non
         In the case when CIs were not set to be calculated,
         their values would correspond exactly to the parameter values.
     """
+
+    print("\nDEBUG: infer_skyline input:")
+    print(f"  la = {la}")
+    print(f"  psi = {psi}")
+    print(f"  p = {p}")
+    print(f"  times = {times}")
+
     if la is None and psi is None and p is None:
         raise ValueError('At least one of the model parameters needs to be specified for identifiability')
 
@@ -395,6 +402,7 @@ def infer_skyline(forest, T, n_intervals=2, la=None, psi=None, p=None, times=Non
     psi_list = ensure_list(psi, n_intervals)
     p_list = ensure_list(p, n_intervals)
 
+
     # For times, if not provided, we'll set them to None and they'll be optimized
     if times is None:
         times_list = [None] * (n_intervals - 1)
@@ -403,12 +411,21 @@ def infer_skyline(forest, T, n_intervals=2, la=None, psi=None, p=None, times=Non
             raise ValueError(f"Expected {n_intervals - 1} time points for {n_intervals} intervals, got {len(times)}")
         times_list = list(times)
 
+        print("\nDEBUG: After ensure_list:")
+        print(f"  la_list = {la_list}")
+        print(f"  psi_list = {psi_list}")
+        print(f"  p_list = {p_list}")
+        print(f"  times_list = {times_list}")
+
     # Create the input parameters vector
     input_params = []
     input_params.extend(la_list)
     input_params.extend(psi_list)
     input_params.extend(p_list)
     input_params.extend(times_list)
+
+    print("\nDEBUG: input_params:")
+    print(f"  input_params = {input_params}")
 
     # Create bounds for all parameters
     bounds = []
@@ -437,13 +454,13 @@ def infer_skyline(forest, T, n_intervals=2, la=None, psi=None, p=None, times=Non
     start_parameters = []
     # la values
     for i in range(n_intervals):
-        start_parameters.append(bd_start[0])
+        start_parameters.append(bd_start[0] if la_list[i] is None else la_list[i])
     # psi values
     for i in range(n_intervals):
-        start_parameters.append(bd_start[1])
+        start_parameters.append(bd_start[1] if psi_list[i] is None else psi_list[i])
     # rho values
     for i in range(n_intervals):
-        start_parameters.append(bd_start[2])
+        start_parameters.append(bd_start[2] if p_list[i] is None else p_list[i])
 
     # For time points, distribute them evenly in [0, T]
     for i in range(n_intervals - 1):
@@ -485,12 +502,23 @@ def infer_skyline(forest, T, n_intervals=2, la=None, psi=None, p=None, times=Non
 
 def format_parameters_skyline(params, n_intervals, fixed=None, epi=True):
     """Format BDSKY parameters for display"""
+    # Debug print
+    print(f"\nDEBUG format_parameters_skyline:")
+    print(f"  params = {params}")
+    print(f"  n_intervals = {n_intervals}")
+    print(f"  fixed = {fixed}")
+
     result = []
 
     # Extract parameters
     la_values = params[:n_intervals]
     psi_values = params[n_intervals:2 * n_intervals]
     rho_values = params[2 * n_intervals:3 * n_intervals]
+
+    # More debug prints
+    print(f"  la_values = {la_values}")
+    print(f"  psi_values = {psi_values}")
+    print(f"  rho_values = {rho_values}")
 
     # Extract fixed indicators if provided
     if fixed is not None:
@@ -649,6 +677,12 @@ def main():
 
     params = parser.parse_args()
 
+    print("\nDEBUG: Command line parameters:")
+    print(f"  la = {params.la}")
+    print(f"  psi = {params.psi}")
+    print(f"  p = {params.p}")
+    print(f"  times = {params.times}")
+
     # Determine number of intervals from time points
     if params.times is not None:
         n_intervals = len(params.times) + 1
@@ -673,15 +707,19 @@ def main():
     p = params.p
     times = params.times
 
-    # Check parameter dimensions and replicate single values if needed
-    for param_name, param_value in [('la', la), ('psi', psi), ('p', p)]:
-        if param_value is not None:
-            if len(param_value) == 1:
-                # Replicate a single value across all intervals
-                globals()[param_name] = param_value * n_intervals
-            elif len(param_value) != n_intervals:
-                raise ValueError(
-                    f"If providing multiple values for {param_name}, must provide exactly {n_intervals} values (one for each interval)")
+    # Replicate single values if needed
+    if la is not None and len(la) == 1:
+        la = la * n_intervals
+    if psi is not None and len(psi) == 1:
+        psi = psi * n_intervals
+    if p is not None and len(p) == 1:
+        p = p * n_intervals
+
+    print("\nDEBUG: After processing:")
+    print(f"  la = {la}")
+    print(f"  psi = {psi}")
+    print(f"  p = {p}")
+    print(f"  times = {times}")
 
     # Estimate parameters
     vs, cis = infer_skyline(

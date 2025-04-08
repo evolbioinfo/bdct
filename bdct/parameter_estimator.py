@@ -47,6 +47,10 @@ def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_functi
     :param forest: a list of ete3.Tree trees
     :return: tuple: (the values of optimized parameters, CIs)
     """
+    print("\nDEBUG: optimize_likelihood_params:")
+    print(f"  input_parameters = {input_parameters}")
+    print(f"  optimised_parameter_mask = {input_parameters == None}")
+
     optimised_parameter_mask = input_parameters == None
     if np.all(optimised_parameter_mask == False):
         return start_parameters, loglikelihood_function(forest, *start_parameters, T=T, threads=threads)
