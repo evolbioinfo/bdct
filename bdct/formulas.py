@@ -220,3 +220,5 @@ def prob_event1_before_other_events(rate1, *other_rates):
     :return: probability described above
     """
     return rate1 / (rate1 + sum(other_rates))
+
+
