@@ -378,11 +378,11 @@ def infer_skyline(forest, T, n_intervals=2, la=None, psi=None, p=None, times=Non
         their values would correspond exactly to the parameter values.
     """
 
-    print("\nDEBUG: infer_skyline input:")
-    print(f"  la = {la}")
-    print(f"  psi = {psi}")
-    print(f"  p = {p}")
-    print(f"  times = {times}")
+    #print("\nDEBUG: infer_skyline input:")
+    #print(f"  la = {la}")
+    #print(f"  psi = {psi}")
+    #print(f"  p = {p}")
+    #print(f"  times = {times}")
 
     if la is None and psi is None and p is None:
         raise ValueError('At least one of the model parameters needs to be specified for identifiability')
@@ -411,11 +411,11 @@ def infer_skyline(forest, T, n_intervals=2, la=None, psi=None, p=None, times=Non
             raise ValueError(f"Expected {n_intervals - 1} time points for {n_intervals} intervals, got {len(times)}")
         times_list = list(times)
 
-        print("\nDEBUG: After ensure_list:")
-        print(f"  la_list = {la_list}")
-        print(f"  psi_list = {psi_list}")
-        print(f"  p_list = {p_list}")
-        print(f"  times_list = {times_list}")
+        #print("\nDEBUG: After ensure_list:")
+        #print(f"  la_list = {la_list}")
+        #print(f"  psi_list = {psi_list}")
+        #print(f"  p_list = {p_list}")
+        #print(f"  times_list = {times_list}")
 
     # Create the input parameters vector
     input_params = []
@@ -424,8 +424,8 @@ def infer_skyline(forest, T, n_intervals=2, la=None, psi=None, p=None, times=Non
     input_params.extend(p_list)
     input_params.extend(times_list)
 
-    print("\nDEBUG: input_params:")
-    print(f"  input_params = {input_params}")
+    #print("\nDEBUG: input_params:")
+    #print(f"  input_params = {input_params}")
 
     # Create bounds for all parameters
     bounds = []
@@ -503,10 +503,10 @@ def infer_skyline(forest, T, n_intervals=2, la=None, psi=None, p=None, times=Non
 def format_parameters_skyline(params, n_intervals, fixed=None, epi=True):
     """Format BDSKY parameters for display"""
     # Debug print
-    print(f"\nDEBUG format_parameters_skyline:")
-    print(f"  params = {params}")
-    print(f"  n_intervals = {n_intervals}")
-    print(f"  fixed = {fixed}")
+    #print(f"\nDEBUG format_parameters_skyline:")
+    #print(f"  params = {params}")
+    #print(f"  n_intervals = {n_intervals}")
+    #print(f"  fixed = {fixed}")
 
     result = []
 
@@ -516,9 +516,9 @@ def format_parameters_skyline(params, n_intervals, fixed=None, epi=True):
     rho_values = params[2 * n_intervals:3 * n_intervals]
 
     # More debug prints
-    print(f"  la_values = {la_values}")
-    print(f"  psi_values = {psi_values}")
-    print(f"  rho_values = {rho_values}")
+    #print(f"  la_values = {la_values}")
+    #print(f"  psi_values = {psi_values}")
+    #print(f"  rho_values = {rho_values}")
 
     # Extract fixed indicators if provided
     if fixed is not None:
@@ -677,11 +677,11 @@ def main():
 
     params = parser.parse_args()
 
-    print("\nDEBUG: Command line parameters:")
-    print(f"  la = {params.la}")
-    print(f"  psi = {params.psi}")
-    print(f"  p = {params.p}")
-    print(f"  times = {params.times}")
+    #print("\nDEBUG: Command line parameters:")
+    #print(f"  la = {params.la}")
+    #print(f"  psi = {params.psi}")
+    #print(f"  p = {params.p}")
+    #print(f"  times = {params.times}")
 
     # Determine number of intervals from time points
     if params.times is not None:
@@ -715,11 +715,11 @@ def main():
     if p is not None and len(p) == 1:
         p = p * n_intervals
 
-    print("\nDEBUG: After processing:")
-    print(f"  la = {la}")
-    print(f"  psi = {psi}")
-    print(f"  p = {p}")
-    print(f"  times = {times}")
+    #print("\nDEBUG: After processing:")
+    #print(f"  la = {la}")
+    #print(f"  psi = {psi}")
+    #print(f"  p = {p}")
+    #print(f"  times = {times}")
 
     # Estimate parameters
     vs, cis = infer_skyline(
