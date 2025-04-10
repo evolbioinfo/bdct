@@ -47,6 +47,10 @@ def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_functi
     :param forest: a list of ete3.Tree trees
     :return: tuple: (the values of optimized parameters, CIs)
     """
+    #print("\nDEBUG: optimize_likelihood_params:")
+    #print(f"  input_parameters = {input_parameters}")
+    #print(f"  optimised_parameter_mask = {input_parameters == None}")
+
     optimised_parameter_mask = input_parameters == None
     if np.all(optimised_parameter_mask == False):
         return start_parameters, loglikelihood_function(forest, *start_parameters, T=T, threads=threads)
@@ -119,14 +123,27 @@ def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_functi
 
 def estimate_cis(T, forest, input_parameters, loglikelihood_function, optimised_parameters, bounds, threads=1,
                  optimise_as_logs=None, parameter_transformers=None):
+    # Create optimised_cis array same as bounds
     optimised_cis = np.array(bounds)
-    fixed_parameter_mask = input_parameters != None
-    optimised_cis[fixed_parameter_mask, 0] = input_parameters[fixed_parameter_mask]
-    optimised_cis[fixed_parameter_mask, 1] = input_parameters[fixed_parameter_mask]
 
-    n_optimized_params = len(input_parameters[~fixed_parameter_mask])
+    # Convert input_parameters to numpy array for consistent handling
+    input_parameters = np.array(input_parameters)
+
+    # Create a mask for fixed parameters (not None)
+    fixed_parameter_mask = np.array([p is not None for p in input_parameters])
+
+    # Set fixed parameter values in CI bounds
+    for i in range(len(input_parameters)):
+        if fixed_parameter_mask[i]:
+            optimised_cis[i, 0] = input_parameters[i]
+            optimised_cis[i, 1] = input_parameters[i]
+
+    # Count number of optimized parameters
+    n_optimized_params = np.sum(~fixed_parameter_mask)
     print(f'Estimating CIs for {n_optimized_params} free parameters...')
-    lk_threshold = (loglikelihood_function(forest, *optimised_parameters, T, threads=threads)
+
+    # Calculate likelihood threshold for CI
+    lk_threshold = (loglikelihood_function(forest, *optimised_parameters, T=T, threads=threads)
                     - get_chi2_threshold(num_parameters=n_optimized_params))
 
     def binary_search(v_min, v_max, get_lk, lower=True):
@@ -146,40 +163,32 @@ def estimate_cis(T, forest, input_parameters, loglikelihood_function, optimised_
 
     def get_ci(args):
         (i, optimised_value) = args
-        # print('---------')
-        # print(i, optimised_value, (b_min, b_max))
 
+        # Skip fixed parameters
+        if fixed_parameter_mask[i]:
+            return
+
+        # Create copies for modification
         rps = np.array(optimised_parameters)
         ip = np.array(input_parameters)
 
         def get_lk(v):
             rps[i] = v
             ip[i] = v
-            return optimize_likelihood_params(forest, T, ip, loglikelihood_function,
-                                              bounds=optimised_cis, start_parameters=rps,
-                                              threads=threads, num_attemps=1,
-                                              optimise_as_logs=optimise_as_logs)[-1]
+            return \
+            optimize_likelihood_params(forest, T=T, input_parameters=ip, loglikelihood_function=loglikelihood_function,
+                                       bounds=optimised_cis, start_parameters=rps,
+                                       threads=threads, num_attemps=1,
+                                       optimise_as_logs=optimise_as_logs)[-1]
 
+        # Calculate lower and upper bounds
         optimised_cis[i, 0] = binary_search(optimised_cis[i, 0], optimised_value, get_lk, True)
         optimised_cis[i, 1] = binary_search(optimised_value, optimised_cis[i, 1], get_lk, False)
-        # print(i, optimised_cis[i, :])
-        # print('---------')
 
-    # if threads > 1:
-    #     with ThreadPool(processes=min(threads, len(bounds))) as pool:
-    #         pool.map(func=get_ci,
-    #                  iterable=zip(((i, v) for (i, v) in enumerate(optimised_parameters)
-    #                                if input_parameters[i] is not None), bounds), chunksize=1)
-    # else:
-    for _ in ((i, v) for (i, v) in enumerate(optimised_parameters) if input_parameters[i] is None):
-        get_ci(_)
-
-
-    # if parameter_transformers is not None:
-    #     transformed_optimised_parameters = parameter_transformers[0](optimised_parameters)
-    #     transformed_input_parameters = parameter_transformers[0](input_parameters)
-    #     for _ in ((i, v) for (i, v) in enumerate(transformed_optimised_parameters) if pd.isna(transformed_input_parameters[i])):
-    #         get_ci(_)
+    # Calculate CI for each parameter to be optimized
+    for i, v in enumerate(optimised_parameters):
+        if not fixed_parameter_mask[i]:
+            get_ci((i, v))
 
     return optimised_cis
 
