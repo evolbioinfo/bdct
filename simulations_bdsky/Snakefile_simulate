@@ -1,0 +1,58 @@
+import os
+
+# To run locally:
+## with singularity (a.k.a apptainer)
+###  to install apptainer, run the dollowing commands in the Terminal:
+###  cd /tmp
+###  wget https://github.com/apptainer/apptainer/releases/download/v1.4.0/apptainer_1.4.0_amd64.deb
+###  sudo apt install -y ./apptainer_1.4.0_amd64.deb
+## snakemake --snakefile Snakefile_simulate --rerun-triggers mtime --keep-going --cores 8 --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
+##
+## without singularity
+## snakemake --snakefile Snakefile_simulate --rerun-triggers mtime --keep-going --cores 8
+
+
+localrules: all
+
+# by default the folder will be the same one where Snakemake is located
+folder = config.get("folder", '.')
+
+rule all:
+    input:
+        expand(os.path.join(folder, 'trees', 'tree.{i}.nwk'), i=range(100)),
+
+
+
+rule simulate_bdsky_tree:
+    '''
+    Simulate a BDSKY tree.
+    '''
+    output:
+        log=os.path.join(folder, 'trees', 'tree.{i}.log'),
+        nwk=os.path.join(folder, 'trees', 'tree.{i}.nwk'),
+    params:
+        mem=2000,
+        name='tree.{i}',
+        qos='fast'
+    threads: 1
+    singularity: "docker://evolbioinfo/treesimulator:v0.2.8"
+    shell:
+        """        
+        while [ ! -f {output.nwk} ]
+        do             
+            python3 py/parameter_generator.py --log {output.log}.params \
+            --min_R0 1 \
+            --max_R0 10  \
+            --min_rho 0.05  \
+            --max_rho 0.75  \
+            --min_di 1  \
+            --max_di 21  
+        
+            la=`tail -n 1 {output.log}.params | awk -F',' '{{ print $1 }}'`
+            psi=`tail -n 1 {output.log}.params | awk -F',' '{{ print $2 }}'`
+            p=`tail -n 1 {output.log}.params | awk -F',' '{{ print $3 }}'`
+            
+            timeout 4m generate_bd --min_tips 500 --max_tips 1000 --la $la --psi $psi --p $p  \
+                --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'   
+        done
+        """
