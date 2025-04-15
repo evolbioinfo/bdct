@@ -6,53 +6,141 @@ import os
 ###  cd /tmp
 ###  wget https://github.com/apptainer/apptainer/releases/download/v1.4.0/apptainer_1.4.0_amd64.deb
 ###  sudo apt install -y ./apptainer_1.4.0_amd64.deb
-## snakemake --snakefile Snakefile_simulate --rerun-triggers mtime --keep-going --cores 8 --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
+## snakemake --snakefile Snakefile_simulate --keep-going --cores 8 --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
 ##
 ## without singularity
-## snakemake --snakefile Snakefile_simulate --rerun-triggers mtime --keep-going --cores 8
+## snakemake --snakefile Snakefile_simulate --keep-going --cores 8
 
 
 localrules: all
 
 # by default the folder will be the same one where Snakemake is located
-folder = config.get("folder", '.')
+folder = config.get("folder",'.')
+
+# Get the number of models from config, default to 2
+num_models = config.get("num_models",2)
+if num_models < 1 or num_models > 10:
+    print(f"Warning: num_models must be between 1 and 10, got {num_models}. Setting to 2.")
+    num_models = 2
 
 rule all:
     input:
-        expand(os.path.join(folder, 'trees', 'tree.{i}.nwk'), i=range(100)),
-
+        expand(os.path.join(folder,'trees','tree.{i}.nwk'),i=range(100)),
 
 
 rule simulate_bdsky_tree:
     '''
-    Simulate a BDSKY tree.
+    Simulate a BDSKY tree with N model skylines.
     '''
     output:
-        log=os.path.join(folder, 'trees', 'tree.{i}.log'),
-        nwk=os.path.join(folder, 'trees', 'tree.{i}.nwk'),
+        log=os.path.join(folder,'trees','tree.{i}.log'),
+        nwk=os.path.join(folder,'trees','tree.{i}.nwk'),
+        params=os.path.join(folder,'trees','tree.{i}.log.params'),
     params:
         mem=2000,
         name='tree.{i}',
-        qos='fast'
+        qos='fast',
+        num_models=num_models
     threads: 1
     singularity: "docker://evolbioinfo/treesimulator:v0.2.8"
     shell:
-        """        
+        """
         while [ ! -f {output.nwk} ]
         do             
-            python3 py/parameter_generator.py --log {output.log}.params \
-            --min_R0 1 \
-            --max_R0 10  \
-            --min_rho 0.05  \
-            --max_rho 0.75  \
-            --min_di 1  \
-            --max_di 21  
-        
-            la=`tail -n 1 {output.log}.params | awk -F',' '{{ print $1 }}'`
-            psi=`tail -n 1 {output.log}.params | awk -F',' '{{ print $2 }}'`
-            p=`tail -n 1 {output.log}.params | awk -F',' '{{ print $3 }}'`
-            
-            timeout 4m generate_bd --min_tips 500 --max_tips 1000 --la $la --psi $psi --p $p  \
-                --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'   
+            # Generate parameters for N models
+            python3 py/parameter_generator.py --log {output.params} --num_models {params.num_models} \
+                --min_R0_1 1 --max_R0_1 10 --min_rho_1 0.05 --max_rho_1 0.75 --min_di_1 1 --max_di_1 21 \
+                --min_R0_2 1 --max_R0_2 10 --min_rho_2 0.05 --max_rho_2 0.75 --min_di_2 1 --max_di_2 21 \
+                --min_R0_3 1 --max_R0_3 10 --min_rho_3 0.05 --max_rho_3 0.75 --min_di_3 1 --max_di_3 21 \
+                --min_R0_4 1 --max_R0_4 10 --min_rho_4 0.05 --max_rho_4 0.75 --min_di_4 1 --max_di_4 21 \
+                --min_R0_5 1 --max_R0_5 10 --min_rho_5 0.05 --max_rho_5 0.75 --min_di_5 1 --max_di_5 21 \
+                --min_R0_6 1 --max_R0_6 10 --min_rho_6 0.05 --max_rho_6 0.75 --min_di_6 1 --max_di_6 21 \
+                --min_R0_7 1 --max_R0_7 10 --min_rho_7 0.05 --max_rho_7 0.75 --min_di_7 1 --max_di_7 21 \
+                --min_R0_8 1 --max_R0_8 10 --min_rho_8 0.05 --max_rho_8 0.75 --min_di_8 1 --max_di_8 21 \
+                --min_R0_9 1 --max_R0_9 10 --min_rho_9 0.05 --max_rho_9 0.75 --min_di_9 1 --max_di_9 21 \
+                --min_R0_10 1 --max_R0_10 10 --min_rho_10 0.05 --max_rho_10 0.75 --min_di_10 1 --max_di_10 21 \
+                --min_change_time 5 --max_change_time 50 --sort_change_times True
+
+            # Extract parameters for all models
+            la_values=""
+            psi_values=""
+            p_values=""
+            change_times=""
+
+            # Loop through each model to extract parameters
+            for i in $(seq 1 {params.num_models}); do
+                # Calculate column indices for each parameter
+                la_col=$((5*(i-1) + 1))
+                psi_col=$((5*(i-1) + 2))
+                p_col=$((5*(i-1) + 3))
+
+                # Extract values
+                la_val=$(tail -n 1 {output.params} | awk -F',' "{{ print \$$la_col }}")
+                psi_val=$(tail -n 1 {output.params} | awk -F',' "{{ print \$$psi_col }}")
+                p_val=$(tail -n 1 {output.params} | awk -F',' "{{ print \$$p_col }}")
+
+                # Append to comma-separated strings (with no trailing comma)
+                if [ -z "$la_values" ]; then
+                    la_values="$la_val"
+                    psi_values="$psi_val"
+                    p_values="$p_val"
+                else
+                    la_values="$la_values,$la_val"
+                    psi_values="$psi_values,$psi_val"
+                    p_values="$p_values,$p_val"
+                fi
+            done
+
+            # Extract change times if more than one model
+            if [ {params.num_models} -gt 1 ]; then
+                for i in $(seq 1 $(({params.num_models}-1))); do
+                    # Calculate column index for change time
+                    # 5*num_models (all model params) + change_time index
+                    time_col=$((5*{params.num_models} + i))
+
+                    # Extract time value
+                    time_val=$(tail -n 1 {output.params} | awk -F',' "{{ print \$$time_col }}")
+
+                    # Append to comma-separated string
+                    if [ -z "$change_times" ]; then
+                        change_times="$time_val"
+                    else
+                        change_times="$change_times,$time_val"
+                    fi
+                done
+            fi
+
+            # Print debug info
+            echo "Number of models: {params.num_models}"
+            echo "Lambda values: $la_values"
+            echo "Psi values: $psi_values"
+            echo "P values: $p_values"
+            echo "Change times: $change_times"
+
+            # Try different ways to run generate_bd with the skyline model
+            if [ {params.num_models} -eq 1 ]; then
+                # Single model case - no skyline needed
+                timeout 4m generate_bd --min_tips 500 --max_tips 1000 \
+                    --la $la_values --psi $psi_values --p $p_values \
+                    --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
+            elif generate_bd --help 2>&1 | grep -q "skyline"; then
+                # The tool supports skyline models with specific flags
+                timeout 4m generate_bd --min_tips 500 --max_tips 1000 \
+                    --la_skyline "$la_values" --psi_skyline "$psi_values" --p_skyline "$p_values" \
+                    --skyline_times "$change_times" \
+                    --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
+            elif generate_bd --help 2>&1 | grep -q "shift_time"; then
+                # The tool supports shift_time for rate changes
+                timeout 4m generate_bd --min_tips 500 --max_tips 1000 \
+                    --la "$la_values" --psi "$psi_values" --p "$p_values" \
+                    --shift_time "$change_times" \
+                    --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
+            else
+                # Fallback to single model if skyline not supported
+                echo "Warning: generate_bd does not appear to support skyline models. Falling back to first model parameters only."
+                timeout 4m generate_bd --min_tips 500 --max_tips 1000 \
+                    --la $la_values --psi $psi_values --p $p_values \
+                    --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
+            fi
         done
         """
