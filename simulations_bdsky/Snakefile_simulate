@@ -11,6 +11,9 @@ import os
 ## without singularity
 ## snakemake --snakefile Snakefile_simulate --keep-going --cores 8
 
+##to run: snakemake --snakefile simulations_bdsky/Snakefile_simulate --config num_models x --keep-going --cores 8
+
+
 
 localrules: all
 
