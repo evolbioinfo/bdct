@@ -11,7 +11,7 @@ import os
 ## without singularity
 ## snakemake --snakefile Snakefile_simulate --keep-going --cores 8
 
-##to run: snakemake --snakefile simulations_bdsky/Snakefile_simulate --config num_models x --keep-going --cores 8
+##to run: snakemake --snakefile simulations_bdsky/Snakefile_simulate --config num_models=x --keep-going --cores 8
 
 
 
@@ -21,14 +21,14 @@ localrules: all
 folder = config.get("folder",'.')
 
 # Get the number of models from config, default to 2
-num_models = config.get("num_models",2)
+num_models = config.get("num_models", 2)
 if num_models < 1 or num_models > 10:
     print(f"Warning: num_models must be between 1 and 10, got {num_models}. Setting to 2.")
     num_models = 2
 
 rule all:
     input:
-        expand(os.path.join(folder,'trees','tree.{i}.nwk'),i=range(100)),
+        expand(os.path.join(folder,'trees','tree.{i}.nwk'),i=range(1)),
 
 
 rule simulate_bdsky_tree:
@@ -45,7 +45,7 @@ rule simulate_bdsky_tree:
         qos='fast',
         num_models=num_models
     threads: 1
-    singularity: "docker://evolbioinfo/treesimulator:v0.2.8"
+    singularity: "docker://evolbioinfo/treesimulator:v0.2.9"
     shell:
         """
         while [ ! -f {output.nwk} ]
@@ -65,85 +65,25 @@ rule simulate_bdsky_tree:
                 --min_change_time 5 --max_change_time 50 --sort_change_times True
 
             # Extract parameters for all models
-            la_values=""
-            psi_values=""
-            p_values=""
-            change_times=""
-
-            # Loop through each model to extract parameters
-            for i in $(seq 1 {params.num_models}); do
-                # Calculate column indices for each parameter
-                la_col=$((5*(i-1) + 1))
-                psi_col=$((5*(i-1) + 2))
-                p_col=$((5*(i-1) + 3))
-
-                # Extract values
-                la_val=$(tail -n 1 {output.params} | awk -F',' "{{ print \$$la_col }}")
-                psi_val=$(tail -n 1 {output.params} | awk -F',' "{{ print \$$psi_col }}")
-                p_val=$(tail -n 1 {output.params} | awk -F',' "{{ print \$$p_col }}")
-
-                # Append to comma-separated strings (with no trailing comma)
-                if [ -z "$la_values" ]; then
-                    la_values="$la_val"
-                    psi_values="$psi_val"
-                    p_values="$p_val"
-                else
-                    la_values="$la_values,$la_val"
-                    psi_values="$psi_values,$psi_val"
-                    p_values="$p_values,$p_val"
-                fi
-            done
-
-            # Extract change times if more than one model
-            if [ {params.num_models} -gt 1 ]; then
-                for i in $(seq 1 $(({params.num_models}-1))); do
-                    # Calculate column index for change time
-                    # 5*num_models (all model params) + change_time index
-                    time_col=$((5*{params.num_models} + i))
-
-                    # Extract time value
-                    time_val=$(tail -n 1 {output.params} | awk -F',' "{{ print \$$time_col }}")
-
-                    # Append to comma-separated string
-                    if [ -z "$change_times" ]; then
-                        change_times="$time_val"
-                    else
-                        change_times="$change_times,$time_val"
-                    fi
-                done
-            fi
+            la1=`awk -F, 'NR==2 {{ print $1 }}' {output.params}`
+            psi1=`awk -F, 'NR==2 {{ print $2 }}' {output.params}`
+            p1=`awk -F, 'NR==2 {{ print $3 }}' {output.params}`
+            la2=`awk -F, 'NR==2 {{ print $6 }}' {output.params}`
+            psi2=`awk -F, 'NR==2 {{ print $7 }}' {output.params}`
+            p2=`awk -F, 'NR==2 {{ print $8 }}' {output.params}`
+            t=`awk -F, 'NR==2 {{ print $11 }}' {output.params}`
 
             # Print debug info
             echo "Number of models: {params.num_models}"
-            echo "Lambda values: $la_values"
-            echo "Psi values: $psi_values"
-            echo "P values: $p_values"
-            echo "Change times: $change_times"
+            echo "Lambda values: $la1 $la2"
+            echo "Psi values: $psi1 $psi2"
+            echo "P values: $p1 $p2"
+            echo "Change times: $t"
 
-            # Try different ways to run generate_bd with the skyline model
-            if [ {params.num_models} -eq 1 ]; then
-                # Single model case - no skyline needed
-                timeout 4m generate_bd --min_tips 500 --max_tips 1000 \
-                    --la $la_values --psi $psi_values --p $p_values \
-                    --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
-            elif generate_bd --help 2>&1 | grep -q "skyline"; then
-                # The tool supports skyline models with specific flags
-                timeout 4m generate_bd --min_tips 500 --max_tips 1000 \
-                    --la_skyline "$la_values" --psi_skyline "$psi_values" --p_skyline "$p_values" \
-                    --skyline_times "$change_times" \
-                    --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
-            elif generate_bd --help 2>&1 | grep -q "shift_time"; then
-                # The tool supports shift_time for rate changes
-                timeout 4m generate_bd --min_tips 500 --max_tips 1000 \
-                    --la "$la_values" --psi "$psi_values" --p "$p_values" \
-                    --shift_time "$change_times" \
-                    --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
-            else
-                # Fallback to single model if skyline not supported
-                echo "Warning: generate_bd does not appear to support skyline models. Falling back to first model parameters only."
-                timeout 4m generate_bd --min_tips 500 --max_tips 1000 \
-                    --la $la_values --psi $psi_values --p $p_values \
-                    --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
-            fi
+            
+            timeout 4m generate_bd --min_tips 500 --max_tips 1000 \
+                --la $la1 $la2 --psi $psi1 $psi2 --p $p1 $p2 \
+                --skyline_times $t \
+                --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
         done
         """
