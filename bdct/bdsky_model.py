@@ -2,9 +2,9 @@ import os
 import numpy as np
 import pandas as pd
 
-from formulas import get_c1, get_c2, get_E, get_log_p, get_u, log_factorial
-from parameter_estimator import optimize_likelihood_params, estimate_cis
-from tree_manager import TIME, read_forest, annotate_forest_with_time, get_T
+from bdct.formulas import get_c1, get_c2, get_E, get_log_p, get_u, log_factorial
+from bdct.parameter_estimator import optimize_likelihood_params, estimate_cis
+from bdct.tree_manager import TIME, read_forest, annotate_forest_with_time, get_T
 
 # Reuse constants from BD model
 REMOVAL_RATE = 'removal rate'

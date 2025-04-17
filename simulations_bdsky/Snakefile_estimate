@@ -1,0 +1,214 @@
+import os
+
+# To run locally:
+## with singularity (a.k.a apptainer)
+###  to install apptainer, run the dollowing commands in the Terminal:
+###  cd /tmp
+###  wget https://github.com/apptainer/apptainer/releases/download/v1.4.0/apptainer_1.4.0_amd64.deb
+###  sudo apt install -y ./apptainer_1.4.0_amd64.deb
+## snakemake --snakefile Snakefile_simulate --keep-going --cores 8 --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
+##
+## without singularity
+## snakemake --snakefile Snakefile_simulate --keep-going --cores 8
+
+##to run: snakemake --snakefile Snakefile_simulate --config num_models=x --keep-going --cores 8
+
+localrules: all
+
+# by default the folder will be the same one where Snakemake is located
+folder = config.get("folder",'.')
+
+# Get the number of models from config, default to 2
+num_models = config.get("num_models",2)
+if num_models < 1 or num_models > 10:
+    print(f"Warning: num_models must be between 1 and 10, got {num_models}. Setting to 2.")
+    num_models = 2
+
+# Define minimum and maximum number of tips
+min_tips = 500
+max_tips = 1000
+
+rule all:
+    input:
+        expand(os.path.join(folder,'trees','final_tree.{i}.nwk'),i=range(100)),
+        expand(os.path.join(folder,'results','param_estimation.{i}.csv'),i=range(100))
+
+rule generate_parameters:
+    '''
+    Generate parameters for two BDSKY models and save total tip count
+    '''
+    output:
+        params=os.path.join(folder,'trees','models.{i}.params'),
+    params:
+        mem=1000,
+        name='params.{i}',
+        qos='fast',
+        num_models=num_models
+    threads: 1
+    singularity: "docker://evolbioinfo/treesimulator:v0.2.9"
+    shell:
+        """
+        # Generate parameters for N models
+        python3 py/parameter_generator.py --log {output.params} --num_models {params.num_models} \
+            --min_R0_1 1 --max_R0_1 10 --min_rho_1 0.05 --max_rho_1 0.75 --min_di_1 1 --max_di_1 21 \
+            --min_R0_2 1 --max_R0_2 10 --min_rho_2 0.05 --max_rho_2 0.75 --min_di_2 1 --max_di_2 21 \
+            --min_change_time 5 --max_change_time 50 --sort_change_times False
+
+        # Add total tip count to the parameter file
+        echo "total_tips,$(( {min_tips} + RANDOM % ( {max_tips} - {min_tips} + 1) ))" >> {output.params}
+        """
+
+rule generate_first_tree:
+    '''
+    Generate a tree with half the total tips using the first model parameters
+    '''
+    input:
+        params=os.path.join(folder,'trees','models.{i}.params')
+    output:
+        log=os.path.join(folder,'trees','first_tree.{i}.log'),
+        nwk=os.path.join(folder,'trees','first_tree.{i}.nwk'),
+        time_log=os.path.join(folder,'trees','change_time.{i}.txt')
+    params:
+        mem=2000,
+        name='first_tree.{i}',
+        qos='fast'
+    threads: 1
+    singularity: "docker://evolbioinfo/treesimulator:v0.2.9"
+    shell:
+        """
+        # Extract parameters for the first model and total tips
+        la1=`awk -F, 'NR==2 {{ print $1 }}' {input.params}`
+        psi1=`awk -F, 'NR==2 {{ print $2 }}' {input.params}`
+        p1=`awk -F, 'NR==2 {{ print $3 }}' {input.params}`
+        total_tips=`awk -F, '/total_tips/ {{ print $2 }}' {input.params}`
+        half_tips=$(( total_tips / 2 ))
+
+        # Print debug info
+        echo "Lambda value: $la1"
+        echo "Psi value: $psi1"
+        echo "P value: $p1"
+        echo "Total tips: $total_tips"
+        echo "Half tips: $half_tips"
+
+        while [ ! -f {output.nwk} ]
+        do
+            timeout 4m generate_bd --min_tips $half_tips --max_tips $half_tips \
+                --la $la1 --psi $psi1 --p $p1 \
+                --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
+        done
+
+        # Extract the time at which we have half_tips and save it as change time
+        tree_time=`tail -n 1 {output.log} | awk '{{ print $1 }}'`
+        echo "$tree_time" > {output.time_log}
+        echo "Tree time (change time): $tree_time"
+        """
+
+rule generate_final_tree:
+    '''
+    Generate the final tree with a skyline using both models and the change time
+    '''
+    input:
+        params=os.path.join(folder,'trees','models.{i}.params'),
+        time_log=os.path.join(folder,'trees','change_time.{i}.txt')
+    output:
+        log=os.path.join(folder,'trees','final_tree.{i}.log'),
+        nwk=os.path.join(folder,'trees','final_tree.{i}.nwk')
+    params:
+        mem=2000,
+        name='final_tree.{i}',
+        qos='fast'
+    threads: 1
+    singularity: "docker://evolbioinfo/treesimulator:v0.2.9"
+    shell:
+        """
+        # Extract parameters for both models
+        la1=`awk -F, 'NR==2 {{ print $1 }}' {input.params}`
+        psi1=`awk -F, 'NR==2 {{ print $2 }}' {input.params}`
+        p1=`awk -F, 'NR==2 {{ print $3 }}' {input.params}`
+        la2=`awk -F, 'NR==2 {{ print $6 }}' {input.params}`
+        psi2=`awk -F, 'NR==2 {{ print $7 }}' {input.params}`
+        p2=`awk -F, 'NR==2 {{ print $8 }}' {input.params}`
+        total_tips=`awk -F, '/total_tips/ {{ print $2 }}' {input.params}`
+        change_time=`awk -F, 'NR==1 {{ print $8 }}' {input.time_log}`
+
+        # Print debug info
+        echo "Lambda values: $la1 $la2"
+        echo "Psi values: $psi1 $psi2"
+        echo "P values: $p1 $p2"
+        echo "Change time: $change_time"
+        echo "Total tips: $total_tips"
+
+        while [ ! -f {output.nwk} ]
+        do
+            timeout 4m generate_bd --min_tips $total_tips --max_tips $total_tips \
+                --la $la1 $la2 --psi $psi1 $psi2 --p $p1 $p2 \
+                --skyline_times $change_time \
+                --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
+        done
+        """
+
+rule estimate_parameters:
+    '''
+    Estimate parameters using the bdsky_model.py code with fixed sampling probabilities (p values)
+    '''
+    input:
+        nwk=os.path.join(folder,'trees','final_tree.{i}.nwk'),
+        params=os.path.join(folder,'trees','models.{i}.params'),
+        time_log=os.path.join(folder,'trees','change_time.{i}.txt')
+    output:
+        estimates=os.path.join(folder,'results','param_estimation.{i}.csv')
+    params:
+        mem=2000,
+        name='estimate.{i}',
+        qos='fast',
+        results_dir=os.path.join(folder,'results')
+    threads: 1
+    singularity: "docker://evolbioinfo/treesimulator:v0.2.9"
+    shell:
+        """
+        # Create output directory if it doesn't exist
+        mkdir -p {params.results_dir}
+
+        # Extract parameters from the original file
+        la1=`awk -F, 'NR==2 {{ print $1 }}' {input.params}`
+        psi1=`awk -F, 'NR==2 {{ print $2 }}' {input.params}`
+        p1=`awk -F, 'NR==2 {{ print $3 }}' {input.params}`
+        la2=`awk -F, 'NR==2 {{ print $6 }}' {input.params}`
+        psi2=`awk -F, 'NR==2 {{ print $7 }}' {input.params}`
+        p2=`awk -F, 'NR==2 {{ print $8 }}' {input.params}`
+
+        # Extract the change time as done in the generate_final_tree rule
+        change_time=`awk -F, 'NR==1 {{ print $8 }}' {input.time_log}`
+
+        # Get the tree time (T)
+        tree_time=$(python3 -c "import sys; sys.path.append('/home/alejandra/NEWSNAKE/bdct/'); from bdct.tree_manager import read_forest, annotate_forest_with_time, get_T; forest = read_forest('{input.nwk}'); annotate_forest_with_time(forest); print(get_T(T=None, forest=forest))")
+
+        # Compare change_time and tree_time
+        if (( $(echo "$change_time > $tree_time" | bc -l) )); then
+            # If change_time > tree_time, use only one model
+            echo "Change time ($change_time) is greater than tree time ($tree_time). Using single model estimation."
+
+            # Use only the first model parameters (p1)
+            python /home/alejandra/NEWSNAKE/bdct/bdsky_model.py --nwk {input.nwk} --log {output.estimates} \
+                --p $p1 --threads {threads}
+
+            # Mark in the output that we used a single model
+            echo "Note: Used single model estimation because change time > tree time" >> {output.estimates}
+        else
+            # Normal case: change_time < tree_time, use two models
+            python /home/alejandra/NEWSNAKE/bdct/bdsky_model.py --nwk {input.nwk} --log {output.estimates} \
+                --p $p1 $p2 --times $change_time --threads {threads}
+        fi
+
+        # Append original parameter values to the output file for comparison
+        echo "" >> {output.estimates}
+        echo "Original parameters:" >> {output.estimates}
+        echo "lambda_1,$la1" >> {output.estimates}
+        echo "psi_1,$psi1" >> {output.estimates}
+        echo "rho_1,$p1" >> {output.estimates}
+        echo "lambda_2,$la2" >> {output.estimates}
+        echo "psi_2,$psi2" >> {output.estimates}
+        echo "rho_2,$p2" >> {output.estimates}
+        echo "change_time,$change_time" >> {output.estimates}
+        echo "tree_time,$tree_time" >> {output.estimates}
+        """

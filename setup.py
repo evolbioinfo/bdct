@@ -29,6 +29,7 @@ setup(
             'console_scripts': [
                 'bdct_infer = bdct.bdct_model:main',
                 'bd_infer = bdct.bd_model:main',
+                'bdsky_infer = bdct.bdsky_model:main',
                 'bdct_loglikelihood = bdct.bdct_model:loglikelihood_main',
                 'bd_loglikelihood = bdct.bd_model:loglikelihood_main',
                 'ct_test = bdct.model_distinguisher:main',
