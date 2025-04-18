@@ -452,16 +452,38 @@ def infer_skyline(forest, T, n_intervals=2, la=None, psi=None, p=None, times=Non
     bd_start = get_start_parameters(forest, la=la_list[0], psi=psi_list[0], rho=p_list[0])
 
     start_parameters = []
+    start_parameters = []
+
+    start_parameters = []
+
     # la values
     for i in range(n_intervals):
-        start_parameters.append(bd_start[0] if la_list[i] is None else la_list[i])
+        if la_list[i] is None:
+            # For parameters being optimized, use different starting values
+            # Randomize slightly for each interval to avoid getting stuck
+            start_la = bd_start[0] * (0.8 + 0.4 * np.random.random())
+        else:
+            # For fixed parameters, use the fixed value
+            start_la = la_list[i]
+        start_parameters.append(start_la)
+
     # psi values
     for i in range(n_intervals):
-        start_parameters.append(bd_start[1] if psi_list[i] is None else psi_list[i])
+        if psi_list[i] is None:
+            # Randomize slightly for each interval
+            start_psi = bd_start[1] * (0.8 + 0.4 * np.random.random())
+        else:
+            start_psi = psi_list[i]
+        start_parameters.append(start_psi)
+
     # rho values
     for i in range(n_intervals):
-        start_parameters.append(bd_start[2] if p_list[i] is None else p_list[i])
-
+        if p_list[i] is None:
+            # Randomize slightly for each interval
+            start_rho = bd_start[2] * (0.8 + 0.4 * np.random.random())
+        else:
+            start_rho = p_list[i]
+        start_parameters.append(start_rho)
     # For time points, distribute them evenly in [0, T]
     for i in range(n_intervals - 1):
         if times_list[i] is not None:
@@ -471,11 +493,13 @@ def infer_skyline(forest, T, n_intervals=2, la=None, psi=None, p=None, times=Non
             start_parameters.append((i + 1) * T / n_intervals)
 
     start_parameters = np.array(start_parameters)
+    # Calculate initial loglikelihood for starting parameters
+    initial_lk = loglikelihood(forest, *start_parameters, T=T, threads=threads, u=-1, n_intervals=n_intervals)
 
     print(f'Lower bounds are set to:\t{format_parameters_skyline(bounds[:, 0], n_intervals)}')
     print(f'Upper bounds are set to:\t{format_parameters_skyline(bounds[:, 1], n_intervals)}\n')
     print(
-        f'Starting BDSKY parameters:\t{format_parameters_skyline(start_parameters, n_intervals, fixed=input_params)}\tloglikelihood=N/A')
+        f'Starting BDSKY parameters:\t{format_parameters_skyline(start_parameters, n_intervals, fixed=input_params)}\tloglikelihood={initial_lk}')
 
     # Wrap the loglikelihood function to include n_intervals
     def loglikelihood_wrapper(forest, *parameters, T=T, threads=threads, u=-1):
@@ -576,6 +600,9 @@ def format_parameters_skyline(params, n_intervals, fixed=None, epi=True):
     return ', '.join(result)
 
 
+import os
+import pandas as pd
+
 def save_results_skyline(vs, cis, log, n_intervals, ci=False):
     """Save BDSKY results to a CSV file"""
     os.makedirs(os.path.dirname(os.path.abspath(log)), exist_ok=True)
@@ -642,6 +669,10 @@ def save_results_skyline(vs, cis, log, n_intervals, ci=False):
             (t_min, t_max) = cis[3 * n_intervals + i, :]
             data[col].extend([t_min, t_max])
 
+    # Create DataFrame and save to CSV
+    df = pd.DataFrame(data)
+    df = df[["parameter"] + columns]  # Ensure correct column order
+    df.to_csv(log, index=False)
 
 def main():
     """

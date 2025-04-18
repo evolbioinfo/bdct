@@ -51,9 +51,12 @@ def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_functi
     #print(f"  input_parameters = {input_parameters}")
     #print(f"  optimised_parameter_mask = {input_parameters == None}")
 
+    input_parameters = np.array(input_parameters)
     optimised_parameter_mask = input_parameters == None
+
     if np.all(optimised_parameter_mask == False):
-        return start_parameters, loglikelihood_function(forest, *start_parameters, T=T, threads=threads)
+            print("All parameters are fixed. No optimization will be performed.")
+            return start_parameters, loglikelihood_function(forest, *start_parameters, T=T, threads=threads)
 
     bounds = bounds[optimised_parameter_mask]
     if optimise_as_logs is None:
@@ -82,13 +85,11 @@ def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_functi
             return -np.inf
         ps_real = get_real_params_from_optimised(ps)
         res = loglikelihood_function(forest, *ps_real, T=T, threads=threads)
-        # if np.isnan(res) or res == -np.inf:
-        #     print(f"{formatter(ps_real)}\t-->\t{res}")
+        #print(f"{formatter(ps_real)}\t-->\t{res}")
         return -res
 
     x0 = get_optimised_params_from_real(start_parameters)
     best_log_lh = -get_v(x0)
-
     successful_attempts = 0
     for i in range(max(num_attemps, MAX_ATTEMPTS)):
         if i == 0:

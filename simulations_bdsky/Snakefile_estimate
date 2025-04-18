@@ -153,6 +153,7 @@ rule estimate_parameters:
     '''
     input:
         nwk=os.path.join(folder,'trees','final_tree.{i}.nwk'),
+        log=os.path.join(folder,'trees','final_tree.{i}.log'),
         params=os.path.join(folder,'trees','models.{i}.params'),
         time_log=os.path.join(folder,'trees','change_time.{i}.txt')
     output:
@@ -177,11 +178,11 @@ rule estimate_parameters:
         psi2=`awk -F, 'NR==2 {{ print $7 }}' {input.params}`
         p2=`awk -F, 'NR==2 {{ print $8 }}' {input.params}`
 
-        # Extract the change time as done in the generate_final_tree rule
+        # Extract the change time - last value in time_log file
         change_time=`awk -F, 'NR==1 {{ print $8 }}' {input.time_log}`
 
-        # Get the tree time (T)
-        tree_time=$(python3 -c "import sys; sys.path.append('/home/alejandra/NEWSNAKE/bdct/'); from bdct.tree_manager import read_forest, annotate_forest_with_time, get_T; forest = read_forest('{input.nwk}'); annotate_forest_with_time(forest); print(get_T(T=None, forest=forest))")
+        # Get the tree time - last value in the final_tree log file
+        tree_time=`awk -F, 'NR==2 {{ print $8 }}' {input.log}`
 
         # Compare change_time and tree_time
         if (( $(echo "$change_time > $tree_time" | bc -l) )); then
@@ -199,16 +200,4 @@ rule estimate_parameters:
             python /home/alejandra/NEWSNAKE/bdct/bdsky_model.py --nwk {input.nwk} --log {output.estimates} \
                 --p $p1 $p2 --times $change_time --threads {threads}
         fi
-
-        # Append original parameter values to the output file for comparison
-        echo "" >> {output.estimates}
-        echo "Original parameters:" >> {output.estimates}
-        echo "lambda_1,$la1" >> {output.estimates}
-        echo "psi_1,$psi1" >> {output.estimates}
-        echo "rho_1,$p1" >> {output.estimates}
-        echo "lambda_2,$la2" >> {output.estimates}
-        echo "psi_2,$psi2" >> {output.estimates}
-        echo "rho_2,$p2" >> {output.estimates}
-        echo "change_time,$change_time" >> {output.estimates}
-        echo "tree_time,$tree_time" >> {output.estimates}
         """
