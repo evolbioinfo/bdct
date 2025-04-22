@@ -31,7 +31,8 @@ max_tips = 1000
 rule all:
     input:
         expand(os.path.join(folder,'trees','final_tree.{i}.nwk'),i=range(100)),
-        expand(os.path.join(folder,'results','param_estimation.{i}.csv'),i=range(100))
+        expand(os.path.join(folder,'results','param_estimation.{i}.csv'),i=range(100)),
+        os.path.join(folder, 'comparison', 'bdsky_comparison.csv')  # Add this to include the comparison file
 
 rule generate_parameters:
     '''
@@ -200,4 +201,32 @@ rule estimate_parameters:
             python /home/alejandra/NEWSNAKE/bdct/bdsky_model.py --nwk {input.nwk} --log {output.estimates} \
                 --p $p1 $p2 --times $change_time --threads {threads}
         fi
+        """
+
+rule compare_bdsky_estimates:
+    '''
+    Create a comparison table for BDSKY model: actual vs estimated parameters
+    '''
+    input:
+        tree_logs=expand(os.path.join(folder,'trees','final_tree.{i}.log'),i=range(100)),
+        est_files=expand(os.path.join(folder,'results','param_estimation.{i}.csv'),i=range(100))
+    output:
+        comparison=os.path.join(folder,'comparison','bdsky_comparison.csv')
+    params:
+        mem=2000,
+        name='bdsky_comparison',
+        qos='fast',
+        output_dir=os.path.join(folder,'comparison')
+    threads: 1
+    singularity: "docker://evolbioinfo/python-evol:v3.6richer.2"
+    shell:
+        """
+        # Create output directory if it doesn't exist
+        mkdir -p {params.output_dir}
+
+        # Run Python script to create comparison table
+        python3 py/bdsky_comparison.py \
+            --logs {input.tree_logs} \
+            --estimates {input.est_files} \
+            --output {output.comparison}
         """
