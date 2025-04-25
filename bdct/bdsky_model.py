@@ -1,9 +1,16 @@
 import numpy as np
 
-from bdct.bd_model import DEFAULT_LOWER_BOUNDS, DEFAULT_UPPER_BOUNDS, get_start_parameters
+from bdct.bd_model import DEFAULT_MIN_PROB, DEFAULT_MIN_RATE, DEFAULT_MAX_PROB, DEFAULT_MAX_RATE, get_start_parameters
 from bdct.formulas import get_c1, get_c2, get_E, get_log_p, get_u, log_factorial
 from bdct.parameter_estimator import optimize_likelihood_params, estimate_cis
 from bdct.tree_manager import TIME, read_forest, annotate_forest_with_time, get_T
+
+# New bounds for better inference
+DEFAULT_MIN_LA = 1e-3         # Lower bound for lambda
+DEFAULT_MIN_PSI = 1e-1        # Raised lower bound for psi (prevents extreme 1/psi)
+
+DEFAULT_LOWER_BOUNDS = [DEFAULT_MIN_LA, DEFAULT_MIN_PSI, DEFAULT_MIN_PROB]
+DEFAULT_UPPER_BOUNDS = [DEFAULT_MAX_RATE, DEFAULT_MAX_RATE, DEFAULT_MAX_PROB]
 
 def rates2epi(params, n_intervals=1):
     """

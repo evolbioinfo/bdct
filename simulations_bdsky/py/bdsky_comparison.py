@@ -37,7 +37,7 @@ def parse_tree_log(filename):
                 try:
                     if col_idx < len(values) and values[col_idx]:
                         row_data[col] = float(values[col_idx]) if values[col_idx].replace('.', '', 1).isdigit() else \
-                        values[col_idx]
+                            values[col_idx]
                 except (ValueError, IndexError):
                     row_data[col] = values[col_idx] if col_idx < len(values) else ""
 
@@ -209,6 +209,9 @@ if __name__ == "__main__":
         ('t_1', 'Change Time')
     ]
 
+    # Define error transformation function similar to plot_error.py
+    error_or_1 = lambda x: max(min(x, 1), -1)
+
     # For each tree, compare parameters
     for tree_num in sorted(set(real_params.keys()) & set(est_params.keys())):
         real = real_params[tree_num]
@@ -231,11 +234,21 @@ if __name__ == "__main__":
                     real_val = float(real_val)
                     est_val = float(est_val)
 
+                    # Calculate standard absolute difference
                     abs_diff = est_val - real_val
-                    rel_diff = (abs_diff / real_val * 100) if real_val != 0 else float('inf')
+
+                    # Calculate relative difference with consistent error calculations
+                    if param.startswith('rho_'):
+                        # For probability parameters, use absolute difference
+                        rel_diff = abs_diff
+                    else:
+                        # For rate parameters and their inverses, use relative difference
+                        rel_diff = abs_diff / real_val
+                        # Apply error transformation (cap at ±1 or ±100%)
+                        rel_diff = error_or_1(rel_diff)
 
                     row[f'abs_diff_{param}'] = abs_diff
-                    row[f'rel_diff_{param}'] = rel_diff
+                    row[f'rel_diff_{param}'] = rel_diff * 100  # Convert to percentage
                 except (ValueError, TypeError):
                     pass
 
@@ -257,7 +270,13 @@ if __name__ == "__main__":
         mae_bias_summary.to_csv(mae_bias_path, index=False)
         sys.exit(0)
 
-    # Calculate MAE and bias
+    # Count trees with model 2 parameters for normalization (trees with lambda_2)
+    num_trees_with_model2 = comp_df['real_lambda_2'].notna().sum()
+    if num_trees_with_model2 == 0:
+        # If no trees have model 2, set to 1 to avoid division by zero
+        num_trees_with_model2 = 1
+
+    # Calculate MAE and bias with normalization for _2 parameters based on tree count
     mae_results = {}
     bias_results = {}
 
@@ -275,16 +294,43 @@ if __name__ == "__main__":
                 valid_rows[real_col] = valid_rows[real_col].astype(float)
                 valid_rows[est_col] = valid_rows[est_col].astype(float)
 
-                # Calculate errors
-                abs_errors = (valid_rows[est_col] - valid_rows[real_col]).abs()
-                bias = valid_rows[est_col] - valid_rows[real_col]
+                # Calculate using approach from plot_error.py
+                mae_sum = 0.0
+                bias_sum = 0.0
+                count = 0
 
-                # Calculate MAE and bias
-                mae = abs_errors.mean()
-                mean_bias = bias.mean()
+                for _, row in valid_rows.iterrows():
+                    real_value = row[real_col]
+                    est_value = row[est_col]
 
-                mae_results[param] = mae
-                bias_results[param] = mean_bias
+                    if param.startswith('rho_'):
+                        # For probability parameters, use absolute difference
+                        rel_diff = est_value - real_value
+                    else:
+                        # For rate parameters and their inverses, use relative difference
+                        rel_diff = (est_value - real_value) / real_value
+
+                    # Apply error transformation (cap at ±1 or ±100%)
+                    rel_diff = error_or_1(rel_diff)
+
+                    mae_sum += abs(rel_diff)
+                    bias_sum += rel_diff
+                    count += 1
+
+                # Calculate final values by dividing by count
+                if count > 0:
+                    # For parameters with suffix _2, normalize by number of trees with model 2
+                    # For others, no additional normalization
+                    if param.endswith('_2'):
+                        norm_factor = num_trees_with_model2
+                    else:
+                        norm_factor = 1  # No additional normalization for _1 parameters
+
+                    mae = mae_sum / count / norm_factor
+                    bias = bias_sum / count / norm_factor
+
+                    mae_results[param] = mae
+                    bias_results[param] = bias
 
     # Create summary dataframe
     summary_df = pd.DataFrame()
@@ -292,6 +338,10 @@ if __name__ == "__main__":
     # Add MAE and bias
     summary_df['MAE'] = pd.Series(mae_results)
     summary_df['Bias'] = pd.Series(bias_results)
+
+    # Add the number of trees with model 2 to the summary
+    summary_df.loc['trees_with_model2', 'MAE'] = num_trees_with_model2
+    summary_df.loc['trees_with_model2', 'Bias'] = num_trees_with_model2
 
     # Calculate other statistics
     diff_cols = [col for col in comp_df.columns if col.startswith('abs_diff_') or col.startswith('rel_diff_')]
@@ -317,11 +367,12 @@ if __name__ == "__main__":
     summary_df.to_csv(summary_path)
     logging.info(f"Saved summary statistics to {summary_path}")
 
-    # Create MAE/Bias summary
+    # Create MAE/Bias summary with normalization information
     mae_bias_summary = pd.DataFrame({
         'Parameter': [label for param, label in param_pairs],
         'MAE': [mae_results.get(param, np.nan) for param, label in param_pairs],
-        'Bias': [bias_results.get(param, np.nan) for param, label in param_pairs]
+        'Bias': [bias_results.get(param, np.nan) for param, label in param_pairs],
+        'Normalization_Factor': [num_trees_with_model2 if param.endswith('_2') else 1 for param, _ in param_pairs]
     })
 
     mae_bias_path = os.path.splitext(params.output)[0] + '_mae_bias.csv'

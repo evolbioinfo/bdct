@@ -1,0 +1,3 @@
+parameter,lambda_1,psi_1,rho_1,R0_1,infectious_time_1
+value,0.32455403007987926,0.1,0.1393533331224583,3.2455403007987926,10.0
+Note: Used single model estimation because change time > tree time
