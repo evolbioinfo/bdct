@@ -1,33 +1,9 @@
-import os
 import numpy as np
-import pandas as pd
 
+from bdct.bd_model import DEFAULT_LOWER_BOUNDS, DEFAULT_UPPER_BOUNDS, get_start_parameters
 from bdct.formulas import get_c1, get_c2, get_E, get_log_p, get_u, log_factorial
 from bdct.parameter_estimator import optimize_likelihood_params, estimate_cis
 from bdct.tree_manager import TIME, read_forest, annotate_forest_with_time, get_T
-
-# Reuse constants from BD model
-REMOVAL_RATE = 'removal rate'
-TRANSMISSION_RATE = 'transmission rate'
-SAMPLING_PROBABILITY = 'sampling probability'
-INFECTIOUS_TIME = 'infectious time'
-REPRODUCTIVE_NUMBER = 'R0'
-
-RHO = 'rho'
-PSI = 'psi'
-LA = 'la'
-
-DEFAULT_MIN_PROB = 1e-6
-DEFAULT_MAX_PROB = 1
-DEFAULT_MIN_RATE = 1e-3
-DEFAULT_MAX_RATE = 1e3
-
-DEFAULT_LOWER_BOUNDS = [DEFAULT_MIN_RATE, DEFAULT_MIN_RATE, DEFAULT_MIN_PROB]
-DEFAULT_UPPER_BOUNDS = [DEFAULT_MAX_RATE, DEFAULT_MAX_RATE, DEFAULT_MAX_PROB]
-
-PARAMETER_NAMES = np.array([LA, PSI, RHO])
-EPI_PARAMETER_NAMES = np.array([REPRODUCTIVE_NUMBER, INFECTIOUS_TIME])
-
 
 def rates2epi(params, n_intervals=1):
     """
@@ -99,38 +75,6 @@ def epi2rates(params, n_intervals=1):
     rate_params.extend(time_points)
 
     return np.array(rate_params)
-
-
-def get_start_parameters(forest, la=None, psi=None, rho=None):
-    """Reuse from BD model to estimate starting parameters"""
-    la_is_fixed = la is not None and la > 0
-    psi_is_fixed = psi is not None and psi > 0
-    rho_is_fixed = rho is not None and 0 < rho <= 1
-
-    rho_est = rho if rho_is_fixed else 0.5
-
-    if la_is_fixed and psi_is_fixed:
-        return np.array([la, psi, rho_est], dtype=np.float64)
-
-    # Let's estimate transmission time as a median internal branch length
-    # and sampling time as a median external branch length
-    internal_dists, external_dists = [], []
-    for tree in forest:
-        for n in tree.traverse():
-            if n.is_root() and not n.dist:
-                continue
-            (internal_dists if not n.is_leaf() else external_dists).append(n.dist)
-
-    psi_est = psi if psi_is_fixed else 1 / np.median(external_dists)
-    # if it is a corner case when we only have tips, let's use sampling times
-    la_est = la if la_is_fixed else ((1 / np.median(internal_dists)) if internal_dists else 1.1 * psi_est)
-    if la_est <= psi_est:
-        if la_is_fixed:
-            psi_est = la_est * 0.9
-        else:
-            la_est *= psi_est * 1.1
-
-    return np.array([la_est, psi_est, rho_est], dtype=np.float64)
 
 
 def loglikelihood(forest, *parameters, T, threads=1, u=-1, n_intervals=1):
@@ -450,9 +394,6 @@ def infer_skyline(forest, T, n_intervals=2, la=None, psi=None, p=None, times=Non
     # Create start parameters
     # For rates and probabilities, we'll use the BD start parameters logic
     bd_start = get_start_parameters(forest, la=la_list[0], psi=psi_list[0], rho=p_list[0])
-
-    start_parameters = []
-    start_parameters = []
 
     start_parameters = []
 
