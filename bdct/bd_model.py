@@ -55,11 +55,6 @@ def get_start_parameters(forest, la=None, psi=None, rho=None):
 
     rho_est = rho if rho_is_fixed else 0.5
 
-    if la_is_fixed and psi_is_fixed:
-        return np.array([la, psi, rho_est], dtype=np.float64)
-
-    # Let's estimate transmission time as a median internal branch length
-    # and sampling time as a median external branch length
     internal_dists, external_dists = [], []
     for tree in forest:
         for n in tree.traverse():
@@ -67,9 +62,26 @@ def get_start_parameters(forest, la=None, psi=None, rho=None):
                 continue
             (internal_dists if not n.is_leaf() else external_dists).append(n.dist)
 
-    psi_est = psi if psi_is_fixed else 1 / np.median(external_dists)
-    # if it is a corner case when we only have tips, let's use sampling times
-    la_est = la if la_is_fixed else ((1 / np.median(internal_dists)) if internal_dists else 1.1 * psi_est)
+    if len(external_dists) == 0:
+        raise ValueError("No external branches found to estimate psi.")
+
+    # ⚡ NEW: Use clipped external distances to reduce noise
+    ext_dists_array = np.array(external_dists)
+    lower_clip = np.percentile(ext_dists_array, 5)
+    upper_clip = np.percentile(ext_dists_array, 95)
+    clipped_ext_dists = np.clip(ext_dists_array, a_min=lower_clip, a_max=upper_clip)
+
+    psi_est = psi if psi_is_fixed else 1 / np.mean(clipped_ext_dists)
+
+    if len(internal_dists) == 0:
+        la_est = la if la_is_fixed else 1.1 * psi_est
+    else:
+        int_dists_array = np.array(internal_dists)
+        lower_clip_int = np.percentile(int_dists_array, 5)
+        upper_clip_int = np.percentile(int_dists_array, 95)
+        clipped_int_dists = np.clip(int_dists_array, a_min=lower_clip_int, a_max=upper_clip_int)
+        la_est = la if la_is_fixed else 1 / np.mean(clipped_int_dists)
+
     if la_est <= psi_est:
         if la_is_fixed:
             psi_est = la_est * 0.9
@@ -262,4 +274,3 @@ def loglikelihood_main():
 
 if '__main__' == __name__:
     main()
-

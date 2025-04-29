@@ -237,15 +237,17 @@ if __name__ == "__main__":
                     # Calculate standard absolute difference
                     abs_diff = est_val - real_val
 
-                    # Calculate relative difference with consistent error calculations
-                    if param.startswith('rho_'):
-                        # For probability parameters, use absolute difference
-                        rel_diff = abs_diff
-                    else:
-                        # For rate parameters and their inverses, use relative difference
+                    # Use relative difference for all parameters consistently
+                    # Handle potential division by zero for any parameter
+                    if real_val != 0:
                         rel_diff = abs_diff / real_val
-                        # Apply error transformation (cap at ±1 or ±100%)
-                        rel_diff = error_or_1(rel_diff)
+                    else:
+                        # If real value is zero, use a large value to indicate high relative error
+                        # but still cap it with error_or_1
+                        rel_diff = 1.0 if abs_diff > 0 else -1.0 if abs_diff < 0 else 0.0
+
+                    # Apply error transformation (cap at ±1 or ±100%)
+                    rel_diff = error_or_1(rel_diff)
 
                     row[f'abs_diff_{param}'] = abs_diff
                     row[f'rel_diff_{param}'] = rel_diff * 100  # Convert to percentage
@@ -270,15 +272,10 @@ if __name__ == "__main__":
         mae_bias_summary.to_csv(mae_bias_path, index=False)
         sys.exit(0)
 
-    # Count trees with model 2 parameters for normalization (trees with lambda_2)
-    num_trees_with_model2 = comp_df['real_lambda_2'].notna().sum()
-    if num_trees_with_model2 == 0:
-        # If no trees have model 2, set to 1 to avoid division by zero
-        num_trees_with_model2 = 1
-
-    # Calculate MAE and bias with normalization for _2 parameters based on tree count
+    # Calculate MAE and bias for each parameter
     mae_results = {}
     bias_results = {}
+    tree_counts = {}
 
     for param, label in param_pairs:
         real_col = f'real_{param}'
@@ -286,51 +283,46 @@ if __name__ == "__main__":
 
         # Check if columns exist
         if real_col in comp_df.columns and est_col in comp_df.columns:
-            # Get valid rows
+            # Get valid rows (trees that have both real and estimated values for this parameter)
             valid_rows = comp_df.dropna(subset=[real_col, est_col])
 
-            if len(valid_rows) > 0:
+            # Count trees with this parameter
+            tree_count = len(valid_rows)
+            tree_counts[param] = tree_count
+
+            if tree_count > 0:
                 # Convert to float if needed
                 valid_rows[real_col] = valid_rows[real_col].astype(float)
                 valid_rows[est_col] = valid_rows[est_col].astype(float)
 
-                # Calculate using approach from plot_error.py
+                # Calculate total errors
                 mae_sum = 0.0
                 bias_sum = 0.0
-                count = 0
 
                 for _, row in valid_rows.iterrows():
                     real_value = row[real_col]
                     est_value = row[est_col]
 
-                    if param.startswith('rho_'):
-                        # For probability parameters, use absolute difference
-                        rel_diff = est_value - real_value
-                    else:
-                        # For rate parameters and their inverses, use relative difference
+                    # Use relative difference for all parameters consistently
+                    if real_value != 0:
                         rel_diff = (est_value - real_value) / real_value
+                    else:
+                        # If real value is zero, use a large value but cap it
+                        rel_diff = 1.0 if est_value > 0 else -1.0 if est_value < 0 else 0.0
 
                     # Apply error transformation (cap at ±1 or ±100%)
                     rel_diff = error_or_1(rel_diff)
 
                     mae_sum += abs(rel_diff)
                     bias_sum += rel_diff
-                    count += 1
 
-                # Calculate final values by dividing by count
-                if count > 0:
-                    # For parameters with suffix _2, normalize by number of trees with model 2
-                    # For others, no additional normalization
-                    if param.endswith('_2'):
-                        norm_factor = num_trees_with_model2
-                    else:
-                        norm_factor = 1  # No additional normalization for _1 parameters
+                # Calculate averages - divide total by tree count
+                # Since we're already working with just the valid trees, no need to divide by count again
+                mae = mae_sum / tree_count
+                bias = bias_sum / tree_count
 
-                    mae = mae_sum / count / norm_factor
-                    bias = bias_sum / count / norm_factor
-
-                    mae_results[param] = mae
-                    bias_results[param] = bias
+                mae_results[param] = mae
+                bias_results[param] = bias
 
     # Create summary dataframe
     summary_df = pd.DataFrame()
@@ -339,9 +331,10 @@ if __name__ == "__main__":
     summary_df['MAE'] = pd.Series(mae_results)
     summary_df['Bias'] = pd.Series(bias_results)
 
-    # Add the number of trees with model 2 to the summary
-    summary_df.loc['trees_with_model2', 'MAE'] = num_trees_with_model2
-    summary_df.loc['trees_with_model2', 'Bias'] = num_trees_with_model2
+    # Add the tree counts to the summary
+    for param, count in tree_counts.items():
+        summary_df.loc[f'trees_with_{param}', 'MAE'] = count
+        summary_df.loc[f'trees_with_{param}', 'Bias'] = count
 
     # Calculate other statistics
     diff_cols = [col for col in comp_df.columns if col.startswith('abs_diff_') or col.startswith('rel_diff_')]
@@ -367,12 +360,12 @@ if __name__ == "__main__":
     summary_df.to_csv(summary_path)
     logging.info(f"Saved summary statistics to {summary_path}")
 
-    # Create MAE/Bias summary with normalization information
+    # Create MAE/Bias summary with tree count information
     mae_bias_summary = pd.DataFrame({
         'Parameter': [label for param, label in param_pairs],
         'MAE': [mae_results.get(param, np.nan) for param, label in param_pairs],
         'Bias': [bias_results.get(param, np.nan) for param, label in param_pairs],
-        'Normalization_Factor': [num_trees_with_model2 if param.endswith('_2') else 1 for param, _ in param_pairs]
+        'Tree_Count': [tree_counts.get(param, 0) for param, _ in param_pairs]
     })
 
     mae_bias_path = os.path.splitext(params.output)[0] + '_mae_bias.csv'
