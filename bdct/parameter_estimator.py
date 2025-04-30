@@ -38,88 +38,87 @@ def rescale_log(log_array):
     return factors
 
 
-def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_function, bounds, start_parameters,
-                               threads=1, num_attemps=3, optimise_as_logs=None, formatter=lambda _: _):
-    """
-    Optimizes the likelihood parameters for a given forest and a given MTBD model.
+from scipy.optimize import minimize
 
-
-    :param forest: a list of ete3.Tree trees
-    :return: tuple: (the values of optimized parameters, CIs)
+def optimize_likelihood_params(
+    forest, T, input_parameters, loglikelihood_function,
+    bounds, start_parameters, threads=1, num_attemps=3,
+    optimise_as_logs=None, formatter=lambda _: _
+):
     """
-    #print("\nDEBUG: optimize_likelihood_params:")
-    #print(f"  input_parameters = {input_parameters}")
-    #print(f"  optimised_parameter_mask = {input_parameters == None}")
+    Improved optimizer for likelihood parameters.
+    """
 
     input_parameters = np.array(input_parameters)
     optimised_parameter_mask = input_parameters == None
 
     if np.all(optimised_parameter_mask == False):
-            print("All parameters are fixed. No optimization will be performed.")
-            return start_parameters, loglikelihood_function(forest, *start_parameters, T=T, threads=threads)
-
+        print("All parameters are fixed. No optimization needed.")
+        return start_parameters, loglikelihood_function(forest, *start_parameters, T=T, threads=threads)
+    bounds = np.array(bounds)
     bounds = bounds[optimised_parameter_mask]
+
     if optimise_as_logs is None:
-        optimise_as_logs = [b[0] >= 0 and b[1] <= 1 for b in bounds]
+        optimise_as_logs = np.array([b[0] >= 0 and b[1] <= 1 for b in bounds])
     else:
-        optimise_as_logs = optimise_as_logs[optimised_parameter_mask]
+        optimise_as_logs = np.array(optimise_as_logs)[optimised_parameter_mask]
+
     optimised_bounds = np.array(bounds)
-    optimised_bounds[optimise_as_logs] = np.log10(np.maximum(optimised_bounds[optimise_as_logs],
-                                                             np.finfo(np.float64).eps))
+    optimised_bounds[optimise_as_logs] = np.log10(np.maximum(optimised_bounds[optimise_as_logs], np.finfo(np.float64).eps))
 
     def get_real_params_from_optimised(ps):
-        ps = np.maximum(np.minimum(ps, optimised_bounds[:, 1]), optimised_bounds[:, 0])
+        ps = np.clip(ps, optimised_bounds[:, 0], optimised_bounds[:, 1])
         ps[optimise_as_logs] = np.power(10, ps[optimise_as_logs])
         result = np.array(input_parameters)
         result[optimised_parameter_mask] = ps
         return result
 
     def get_optimised_params_from_real(ps):
-        ps = np.array(ps[optimised_parameter_mask], dtype=np.float64)
+        ps = np.array(ps, dtype=np.float64)[optimised_parameter_mask]
         ps[optimise_as_logs] = np.log10(ps[optimise_as_logs])
         return ps
 
     def get_v(ps):
         if np.any(np.isnan(ps)):
-            # print(f"{ps}\t-->\t-inf")
-            return -np.inf
+            return np.inf
         ps_real = get_real_params_from_optimised(ps)
-        res = loglikelihood_function(forest, *ps_real, T=T, threads=threads)
-        #print(f"{formatter(ps_real)}\t-->\t{res}")
-        return -res
+        return -loglikelihood_function(forest, *ps_real, T=T, threads=threads)
+
+    # Set tighter tolerance and higher precision
+    optimization_options = {
+        'ftol': 1e-9,
+        'gtol': 1e-6,
+        'maxiter': 500,
+        'disp': False
+    }
 
     x0 = get_optimised_params_from_real(start_parameters)
     best_log_lh = -get_v(x0)
+    best_x = np.copy(x0)
     successful_attempts = 0
-    for i in range(max(num_attemps, MAX_ATTEMPTS)):
+
+    for i in range(max(num_attemps, 5)):  # a few random restarts
         if i == 0:
             vs = x0
         else:
-            vs = np.random.uniform(optimised_bounds[:, 0], optimised_bounds[:, 1])
-            if num_attemps > 1:
-                print(f'Starting parameters: {formatter(get_real_params_from_optimised(vs))}')
+            perturb = np.random.uniform(-0.1, 0.1, size=x0.shape)  # small perturbations
+            vs = np.clip(x0 + perturb, optimised_bounds[:, 0], optimised_bounds[:, 1])
 
-        fres = minimize(get_v, x0=vs, method='L-BFGS-B', bounds=optimised_bounds)
+        fres = minimize(get_v, vs, method='L-BFGS-B', bounds=optimised_bounds, options=optimization_options)
+
         if fres.success and not np.any(np.isnan(fres.x)):
             successful_attempts += 1
-            if -fres.fun >= best_log_lh:
-                x0 = np.array(fres.x)
+            if -fres.fun > best_log_lh:
+                best_x = fres.x
                 best_log_lh = -fres.fun
-                # break
-            if num_attemps > 1:
-                print(f'Attempt {i + 1} of trying to optimise the parameters:\t'
-                      f'{formatter(get_real_params_from_optimised(fres.x))}\t->\t{-fres.fun}.')
-        elif num_attemps > 1:
-            print(f'Attempt {i + 1} of trying to optimise the parameters failed, due to {fres.message}.')
-        if successful_attempts >= num_attemps:
-            break
-    if not successful_attempts:
-        raise ValueError(f'Could not optimise the parameter values for this data, '
-                         f'even after {max(num_attemps, MAX_ATTEMPTS)} attempts!')
 
-    optimised_parameters = get_real_params_from_optimised(x0)
+    if successful_attempts == 0:
+        raise RuntimeError("Failed to optimize after multiple attempts!")
+
+    optimised_parameters = get_real_params_from_optimised(best_x)
 
     return optimised_parameters, best_log_lh
+
 
 
 def estimate_cis(T, forest, input_parameters, loglikelihood_function, optimised_parameters, bounds, threads=1,

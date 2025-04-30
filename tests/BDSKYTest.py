@@ -4,6 +4,8 @@ import unittest
 from bdct import bd_model, bdsky_model
 from bdct.tree_manager import get_T, annotate_forest_with_time, read_forest
 
+
+
 NWK = os.path.join(os.path.dirname(__file__), 'data', 'tree.bd.nwk')
 
 """
@@ -125,4 +127,3 @@ class BDSKYTest(unittest.TestCase):
         [la_bd, psi_bd, _], _ = bd_model.infer(forest, T, p=p)
         [_, la, _, psi, _, _, _], _ = bdsky_model.infer_skyline(forest, T, n_intervals=2, p=[p, p], times=[T * 0.001])
         self.assertAlmostEqual(psi_bd, psi, places=3)
-
