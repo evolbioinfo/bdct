@@ -82,6 +82,8 @@ def optimize_likelihood_params(
         if np.any(np.isnan(ps)):
             return np.inf
         ps_real = get_real_params_from_optimised(ps)
+        logresul=loglikelihood_function(forest, *ps_real, T=T, threads=threads)
+        #print(f"ps_real: {ps_real}, logresul:{-logresul}")
         return -loglikelihood_function(forest, *ps_real, T=T, threads=threads)
 
     # Set tighter tolerance and higher precision

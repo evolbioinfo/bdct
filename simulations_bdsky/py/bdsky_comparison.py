@@ -209,9 +209,6 @@ if __name__ == "__main__":
         ('t_1', 'Change Time')
     ]
 
-    # Define error transformation function similar to plot_error.py
-    error_or_1 = lambda x: max(min(x, 1), -1)
-
     # For each tree, compare parameters
     for tree_num in sorted(set(real_params.keys()) & set(est_params.keys())):
         real = real_params[tree_num]
@@ -237,20 +234,14 @@ if __name__ == "__main__":
                     # Calculate standard absolute difference
                     abs_diff = est_val - real_val
 
-                    # Use relative difference for all parameters consistently
-                    # Handle potential division by zero for any parameter
+                    # Use relative difference WITHOUT ANY LIMITING
                     if real_val != 0:
-                        rel_diff = abs_diff / real_val
+                        rel_diff = abs_diff / real_val  # Sin limitación
                     else:
-                        # If real value is zero, use a large value to indicate high relative error
-                        # but still cap it with error_or_1
                         rel_diff = 1.0 if abs_diff > 0 else -1.0 if abs_diff < 0 else 0.0
 
-                    # Apply error transformation (cap at ±1 or ±100%)
-                    rel_diff = error_or_1(rel_diff)
-
                     row[f'abs_diff_{param}'] = abs_diff
-                    row[f'rel_diff_{param}'] = rel_diff * 100  # Convert to percentage
+                    row[f'rel_diff_{param}'] = rel_diff  # Sin limitación
                 except (ValueError, TypeError):
                     pass
 
@@ -272,10 +263,18 @@ if __name__ == "__main__":
         mae_bias_summary.to_csv(mae_bias_path, index=False)
         sys.exit(0)
 
-    # Calculate MAE and bias for each parameter
+    # Calculate MAE and bias for each parameter - RECALCULATING FROM VALUES DIRECTLY
     mae_results = {}
     bias_results = {}
     tree_counts = {}
+
+    # Check sum of rel_diff_psi_1 to confirm calculations
+    if 'rel_diff_psi_1' in comp_df.columns:
+        logging.info(f"Sum of rel_diff_psi_1 values: {comp_df['rel_diff_psi_1'].sum()}")
+        logging.info(f"Number of valid rel_diff_psi_1 values: {comp_df['rel_diff_psi_1'].count()}")
+        if comp_df['rel_diff_psi_1'].count() > 0:
+            logging.info(
+                f"Average of rel_diff_psi_1 values: {comp_df['rel_diff_psi_1'].sum() / comp_df['rel_diff_psi_1'].count()}")
 
     for param, label in param_pairs:
         real_col = f'real_{param}'
@@ -284,45 +283,45 @@ if __name__ == "__main__":
         # Check if columns exist
         if real_col in comp_df.columns and est_col in comp_df.columns:
             # Get valid rows (trees that have both real and estimated values for this parameter)
-            valid_rows = comp_df.dropna(subset=[real_col, est_col])
+            valid_indices = comp_df[[real_col, est_col]].dropna().index
+            valid_rows = comp_df.loc[valid_indices]
 
             # Count trees with this parameter
             tree_count = len(valid_rows)
             tree_counts[param] = tree_count
 
             if tree_count > 0:
-                # Convert to float if needed
-                valid_rows[real_col] = valid_rows[real_col].astype(float)
-                valid_rows[est_col] = valid_rows[est_col].astype(float)
+                # Convert to float
+                real_values = valid_rows[real_col].astype(float)
+                est_values = valid_rows[est_col].astype(float)
 
-                # Calculate total errors
-                mae_sum = 0.0
-                bias_sum = 0.0
+                # RECALCULATE relative differences to ensure no previous limiting was applied
+                rel_diffs = []
+                for idx, row in valid_rows.iterrows():
+                    real_value = float(row[real_col])
+                    est_value = float(row[est_col])
 
-                for _, row in valid_rows.iterrows():
-                    real_value = row[real_col]
-                    est_value = row[est_col]
-
-                    # Use relative difference for all parameters consistently
                     if real_value != 0:
                         rel_diff = (est_value - real_value) / real_value
                     else:
-                        # If real value is zero, use a large value but cap it
                         rel_diff = 1.0 if est_value > 0 else -1.0 if est_value < 0 else 0.0
 
-                    # Apply error transformation (cap at ±1 or ±100%)
-                    rel_diff = error_or_1(rel_diff)
+                    rel_diffs.append(rel_diff)
 
-                    mae_sum += abs(rel_diff)
-                    bias_sum += rel_diff
+                # Calculate MAE and bias
+                if rel_diffs:
+                    mae = sum(abs(diff) for diff in rel_diffs) / len(rel_diffs)
+                    bias = sum(rel_diffs) / len(rel_diffs)
 
-                # Calculate averages - divide total by tree count
-                # Since we're already working with just the valid trees, no need to divide by count again
-                mae = mae_sum / tree_count
-                bias = bias_sum / tree_count
+                    mae_results[param] = mae
+                    bias_results[param] = bias
 
-                mae_results[param] = mae
-                bias_results[param] = bias
+                    # Debug for psi_1
+                    if param == 'psi_1':
+                        logging.info(f"Recalculated bias for psi_1: {bias}")
+                        logging.info(f"Sum of recalculated rel_diff_psi_1: {sum(rel_diffs)}")
+                        logging.info(
+                            f"Manual calculation: {sum(rel_diffs)} / {len(rel_diffs)} = {sum(rel_diffs) / len(rel_diffs)}")
 
     # Create summary dataframe
     summary_df = pd.DataFrame()
@@ -371,3 +370,7 @@ if __name__ == "__main__":
     mae_bias_path = os.path.splitext(params.output)[0] + '_mae_bias.csv'
     mae_bias_summary.to_csv(mae_bias_path, index=False)
     logging.info(f"Saved MAE/Bias summary to {mae_bias_path}")
+
+    # Additional debug - print bias directly to console
+    if 'psi_1' in bias_results:
+        print(f"\n\nFINAL BIAS FOR PSI_1: {bias_results['psi_1']}\n\n")

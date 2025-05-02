@@ -74,10 +74,10 @@ def get_c2(la, psi, c1, C=1):
 
 
 def get_E(c1, c2, t, T):
-    """
-    Returns E = c2 * exp(c1 * (t - T))
-    """
-    return c2 * np.exp(c1 * (t - T))
+    delta = min(t - T, 0)  # asegura que exp() ≤ 1
+    E = c2 * np.exp(c1 * delta)
+    return np.clip(E, 1e-10, 1 - 1e-10)
+
 
 
 def get_u(la, psi, c1, E_t):
