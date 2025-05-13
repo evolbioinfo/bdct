@@ -34,7 +34,7 @@ class BDSKYTest(unittest.TestCase):
         lk_bdsky = bdsky_model.loglikelihood(forest, la, psi, p, T=T)
         self.assertAlmostEqual(lk_bd, lk_bdsky, 6)
 
-    def test_bdsky1_lk_vs_bdsky2_lk(self):
+    def test_bdsky1_lk_vs_bdsky2_lk(self): #NOT PASSING
         """
         Compare likelihood calculated by the BDSKY model with one time interval
         vs BDSKY model with two time intervals but the same model parameters on both intervals,
@@ -43,7 +43,7 @@ class BDSKYTest(unittest.TestCase):
         forest = read_forest(NWK)
         annotate_forest_with_time(forest)
         T = get_T(T=None, forest=forest)
-        lk_bdsky1 = bdsky_model.loglikelihood(forest, la, psi, p, T=T)
+        lk_bdsky1 = bdsky_model.loglikelihood(forest, la, psi, p, T=T, u=0)
         lk_bdsky2 = bdsky_model.loglikelihood(forest, la, la, psi, psi, p, p, T / 2, T=T, n_intervals=2)
         self.assertAlmostEqual(lk_bdsky1, lk_bdsky2, 6)
 

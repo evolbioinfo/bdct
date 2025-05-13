@@ -93,911 +93,166 @@ def epi2rates(params, n_intervals=1):
 
 def loglikelihood(forest, *parameters, T, threads=1, u=-1, n_intervals=1):
     """
-    Calculate log-likelihood for Birth-Death Skyline model with different parameters for different time intervals.
-    This version includes detailed debug output to identify numerical issues.
+    Cálculo teóricamente correcto de log-verosimilitud para el modelo BD-Skyline.
+    Maneja correctamente las condiciones de frontera en todos los casos.
     """
-    print(f"DEBUG: Starting likelihood calculation with {n_intervals} intervals")
-    print(f"DEBUG: Parameters: {parameters}")
-    print(f"DEBUG: T: {T}, threads: {threads}, u: {u}")
+    if n_intervals < 1:
+        raise ValueError("El número de intervalos debe ser al menos 1")
 
-    # Validate parameters
-    if len(parameters) != 3 * n_intervals + (n_intervals - 1) and not (n_intervals == 1 and len(parameters) == 3):
-        error_msg = f"Expected {3 * n_intervals + (n_intervals - 1)} parameters for {n_intervals} intervals, got {len(parameters)}"
-        print(f"ERROR: {error_msg}")
-        raise ValueError(error_msg)
+    # Extraer parámetros
+    la_values = np.array([parameters[i] for i in range(n_intervals * 3) if i % 3 == 0])
+    psi_values = np.array([parameters[i] for i in range(n_intervals * 3) if i % 3 == 1])
+    rho_values = np.array([parameters[i] for i in range(n_intervals * 3) if i % 3 == 2])
 
-    # Extract parameters with improved safeguards
-    la_values = [max(p, 0.001) for p in parameters[:n_intervals]]
-    psi_values = [max(p, 0.001) for p in parameters[n_intervals:2 * n_intervals]]
-    rho_values = [min(max(p, 0.001), 0.999) for p in parameters[2 * n_intervals:3 * n_intervals]]
+    # Obtener límites de tiempo para intervalos
+    time_boundaries = []
+    if n_intervals > 1:
+        time_boundaries = sorted(parameters[3 * n_intervals:])
 
-    print(f"DEBUG: Processed parameters:")
-    print(f"DEBUG: la_values: {la_values}")
-    print(f"DEBUG: psi_values: {psi_values}")
-    print(f"DEBUG: rho_values: {rho_values}")
+    # Añadir T como límite final
+    all_boundaries = time_boundaries + [T]
 
-    # For single interval
-    if n_intervals == 1:
-        print("DEBUG: Using single interval calculation")
-        la, psi, rho = la_values[0], psi_values[0], rho_values[0]
+    # Calcular c1 para cada intervalo (independiente de las condiciones de frontera)
+    c1_values = np.zeros(n_intervals)
+    for i in range(n_intervals):
+        c1_values[i] = get_c1(la_values[i], psi_values[i], rho_values[i])
 
-        # Handle birth rate close to death rate
-        if abs(la - psi) < 1e-6:
-            print(f"DEBUG: Birth rate ({la}) close to death rate ({psi}), adjusting...")
-            # Use proportional approach
-            diff = max(1e-6, abs(la - psi) * 1.1)
-            if la >= psi:
-                psi = la - diff
+    # Calcular los valores de c2 y la probabilidad oculta para cada intervalo
+    # CRÍTICO: debemos manejar la propagación de la condición de frontera correctamente
+
+    # Primero calculamos los valores de c2 y E(t) que necesitaremos
+    # Comenzamos con la condición U(T) = 1 y retrocedemos
+    c2_values = np.zeros(n_intervals)
+    hidden_values = np.zeros(n_intervals + 1)
+    hidden_values[-1] = 1.0  # Condición de frontera U(T) = 1
+
+    # Para cada intervalo, desde el último hasta el primero
+    for i in range(n_intervals - 1, -1, -1):
+        # Obtenemos los parámetros de este intervalo
+        la = la_values[i]
+        psi = psi_values[i]
+        c1 = c1_values[i]
+
+        # Calculamos c2 usando la condición de continuidad del intervalo siguiente
+        c2 = get_c2(la, psi, c1, hidden_values[i + 1])
+        c2_values[i] = c2
+
+        # Calculamos U(t) al inicio de este intervalo
+        t_start = 0 if i == 0 else all_boundaries[i - 1]
+        E_t = get_E(c1, c2, t_start, T)
+        hidden_values[i] = get_u(la, psi, c1, E_t)
+
+    # Inicializar verosimilitud
+    log_lh = 0.0
+
+    # Añadir contribución de linajes no observados
+    hidden_lk = hidden_values[0]  # U(0)
+    if 0 < hidden_lk < 1:
+        u_val = len(forest) * hidden_lk / (1 - hidden_lk) if u < 0 else u
+        log_lh = u_val * np.log(hidden_lk)
+
+    # Función para calcular E(t) con caché
+    E_cache = {}
+
+    def get_cached_E(t, idx):
+        key = (t, idx)
+        if key not in E_cache:
+            c1 = c1_values[idx]
+            c2 = c2_values[idx]
+            E_cache[key] = get_E(c1, c2, t, T)
+        return E_cache[key]
+
+    # Función para determinar a qué intervalo pertenece un tiempo
+    def get_interval_idx(t):
+        # Asegurar que t está dentro de los límites
+        t = max(0, min(t, T))
+        if n_intervals == 1:
+            return 0
+
+        for i, boundary in enumerate(time_boundaries):
+            if t < boundary:  # CORRECCIÓN: < en lugar de <=
+                return i
+        return n_intervals - 1
+
+    # CRÍTICO: Función para calcular correctamente la verosimilitud de rama
+    def calculate_branch_likelihood(t_start, t_end):
+        """Calcula la verosimilitud de una rama o segmento de rama."""
+        if t_start >= t_end:
+            return 0.0
+
+        # Asegurar que estamos dentro de los límites
+        t_start = max(0, min(t_start, T))
+        t_end = max(0, min(t_end, T))
+
+        # Determinar en qué intervalo comienza este segmento
+        interval_idx = get_interval_idx(t_start)
+
+        # Calcular E(t) para los puntos de inicio y fin
+        E_start = get_cached_E(t_start, interval_idx)
+        E_end = get_cached_E(t_end, interval_idx)
+
+        # Calcular la verosimilitud del segmento
+        return get_log_p(c1_values[interval_idx], t_start, t_end, E_start, E_end)
+
+    # Procesar cada árbol
+    for tree in forest:
+        # Eventos de muestreo (tips)
+        for leaf in tree.get_leaves():
+            t_leaf = getattr(leaf, TIME)
+            idx = get_interval_idx(t_leaf)
+            log_lh += np.log(psi_values[idx]) + np.log(rho_values[idx])
+
+        # Eventos de transmisión y ramas
+        for node in tree.traverse('preorder'):
+            t_node = getattr(node, TIME)
+
+            if not node.is_leaf():
+                # Evento de transmisión (nodo interno)
+                idx = get_interval_idx(t_node)
+                num_children = len(node.children)
+                log_lh += log_factorial(num_children) + (num_children - 1) * np.log(la_values[idx])
+
+                # Procesar cada rama hija
+                for child in node.children:
+                    t_child = getattr(child, TIME)
+
+                    # Identificar todos los límites que cruza esta rama
+                    boundaries_crossed = []
+                    for boundary in time_boundaries:
+                        if t_node < boundary < t_child:
+                            boundaries_crossed.append(boundary)
+
+                    if not boundaries_crossed:
+                        # La rama no cruza ningún límite de intervalo
+                        log_lh += calculate_branch_likelihood(t_node, t_child)
+                    else:
+                        # La rama cruza uno o más límites
+                        # Dividir en segmentos por cada límite cruzado
+                        segments = [t_node] + sorted(boundaries_crossed) + [t_child]
+                        for j in range(len(segments) - 1):
+                            log_lh += calculate_branch_likelihood(segments[j], segments[j + 1])
+
+        # Procesar la rama de la raíz
+        if hasattr(tree, 'dist') and tree.dist > 0:
+            root_ti = getattr(tree, TIME)
+            root_t = root_ti - tree.dist
+
+            # Identificar límites cruzados por la rama de la raíz
+            boundaries_crossed = []
+            for boundary in time_boundaries:
+                if root_t < boundary < root_ti:
+                    boundaries_crossed.append(boundary)
+
+            if not boundaries_crossed:
+                # La rama no cruza límites
+                log_lh += calculate_branch_likelihood(root_t, root_ti)
             else:
-                la = psi - diff
-            print(f"DEBUG: Adjusted rates: la={la}, psi={psi}")
-
-        try:
-            # Calculate key parameters
-            print(f"DEBUG: Calculating c1 with la={la}, psi={psi}, rho={rho}")
-            c1 = get_c1(la=la, psi=psi, rho=rho)
-            print(f"DEBUG: c1 = {c1}")
-
-            print(f"DEBUG: Calculating c2 with la={la}, psi={psi}, c1={c1}")
-            c2 = get_c2(la=la, psi=psi, c1=c1)
-            print(f"DEBUG: c2 = {c2}")
-
-            # Calculate extinction probability at time 0
-            print(f"DEBUG: Calculating E(0) with c1={c1}, c2={c2}, T={T}")
-            E_0 = get_E(c1=c1, c2=c2, t=0, T=T)
-            print(f"DEBUG: E_0 = {E_0}")
-
-            # Handle invalid extinction probabilities
-            if not (0 < E_0 < 1):
-                print(f"WARNING: Invalid E_0 = {E_0}, adjusting...")
-                if E_0 <= 0:
-                    E_0 = 1e-10
-                else:  # E_0 >= 1
-                    E_0 = 1 - 1e-10
-                print(f"DEBUG: Adjusted E_0 = {E_0}")
-
-            # Calculate probability of no sampled descendants
-            hidden_lk = 1.0 - E_0
-            print(f"DEBUG: hidden_lk = {hidden_lk}")
-
-            # Initialize likelihood
-            res = 0
-
-            # Handle unsampled lineages
-            if hidden_lk > 0:
-                if u < 0:
-                    # Estimate u
-                    u_val = len(forest) * E_0 / hidden_lk
-                    print(f"DEBUG: Estimated u = {u_val}")
-                    # Scale for large values
-                    if u_val > 100:
-                        old_u = u_val
-                        u_val = 100 + np.log(u_val - 99)
-                        print(f"DEBUG: Scaled large u from {old_u} to {u_val}")
-                else:
-                    u_val = u
-                    print(f"DEBUG: Using provided u = {u_val}")
-
-                if u_val > 0 and E_0 > 0:
-                    u_term = u_val * np.log(E_0)
-                    print(f"DEBUG: u_term = {u_term}")
-                    if np.isfinite(u_term):
-                        res += u_term
-                        print(f"DEBUG: Added u_term to likelihood: {res}")
-                    else:
-                        print(f"WARNING: Non-finite u_term = {u_term}, skipping")
-
-            # Pre-compute log terms
-            log_psi = np.log(psi) if psi > 0 else -1000
-            log_rho = np.log(rho) if rho > 0 else -1000
-            log_la = np.log(la) if la > 0 else -1000
-
-            print(f"DEBUG: log_psi = {log_psi}")
-            print(f"DEBUG: log_rho = {log_rho}")
-            print(f"DEBUG: log_la = {log_la}")
-
-            # Process each tree
-            for tree_idx, tree in enumerate(forest):
-                print(f"DEBUG: Processing tree {tree_idx + 1}/{len(forest)}")
-                n_leaves = len(tree)
-                print(f"DEBUG: Tree has {n_leaves} leaves")
-
-                # Leaf contribution
-                if np.isfinite(log_psi) and np.isfinite(log_rho):
-                    leaf_contribution = n_leaves * (log_psi + log_rho)
-                    res += leaf_contribution
-                    print(f"DEBUG: Added leaf contribution: {leaf_contribution}, running total: {res}")
-                else:
-                    print(f"WARNING: Invalid log values, skipping leaf contribution")
-
-                # Process internal nodes
-                internal_count = 0
-                for node in tree.traverse('preorder'):
-                    if not node.is_leaf():
-                        internal_count += 1
-                        t = getattr(node, TIME)
-                        original_t = t
-                        t = max(0, min(t, T - 1e-6))
-                        if t != original_t:
-                            print(f"DEBUG: Adjusted node time from {original_t} to {t}")
-
-                        # Calculate extinction probability
-                        print(f"DEBUG: Calculating E({t}) for node {internal_count}")
-                        try:
-                            E_t = get_E(c1=c1, c2=c2, t=t, T=T)
-                            print(f"DEBUG: E_t = {E_t}")
-
-                            if not (0 < E_t < 1):
-                                print(f"WARNING: Invalid E_t = {E_t}, adjusting...")
-                                if E_t <= 0:
-                                    E_t = 1e-10
-                                else:  # E_t >= 1
-                                    E_t = 1 - 1e-10
-                                print(f"DEBUG: Adjusted E_t = {E_t}")
-                        except Exception as e:
-                            print(f"ERROR: Failed to calculate E_t: {e}")
-                            E_t = 0.5  # Fallback
-                            print(f"DEBUG: Using fallback E_t = {E_t}")
-
-                        # Node contribution
-                        num_children = len(node.children)
-                        print(f"DEBUG: Node has {num_children} children")
-
-                        internal_contribution = log_factorial(num_children)
-                        if np.isfinite(internal_contribution):
-                            res += internal_contribution
-                            print(
-                                f"DEBUG: Added log_factorial({num_children}) = {internal_contribution}, running total: {res}")
-                        else:
-                            print(
-                                f"WARNING: Non-finite log_factorial({num_children}) = {internal_contribution}, skipping")
-
-                        if np.isfinite(log_la):
-                            la_term = (num_children - 1) * log_la
-                            if np.isfinite(la_term):
-                                res += la_term
-                                print(f"DEBUG: Added (n-1)*log_la = {la_term}, running total: {res}")
-                            else:
-                                print(f"WARNING: Non-finite (n-1)*log_la = {la_term}, skipping")
-
-                        # Process child branches
-                        for child_idx, child in enumerate(node.children):
-                            ti = getattr(child, TIME)
-                            original_ti = ti
-
-                            # Ensure valid time
-                            if ti <= t:
-                                ti = t + 1e-6
-                                print(f"DEBUG: Child time <= parent time, adjusted from {original_ti} to {ti}")
-                            ti = min(ti, T - 1e-6)
-                            if ti != original_ti:
-                                print(f"DEBUG: Adjusted child time from {original_ti} to {ti}")
-
-                            # Calculate extinction probability
-                            print(f"DEBUG: Calculating E({ti}) for child {child_idx + 1}")
-                            try:
-                                E_ti = get_E(c1=c1, c2=c2, t=ti, T=T)
-                                print(f"DEBUG: E_ti = {E_ti}")
-
-                                if not (0 < E_ti < 1):
-                                    print(f"WARNING: Invalid E_ti = {E_ti}, adjusting...")
-                                    if E_ti <= 0:
-                                        E_ti = 1e-10
-                                    else:  # E_ti >= 1
-                                        E_ti = 1 - 1e-10
-                                    print(f"DEBUG: Adjusted E_ti = {E_ti}")
-                            except Exception as e:
-                                print(f"ERROR: Failed to calculate E_ti: {e}")
-                                E_ti = 0.5  # Fallback
-                                print(f"DEBUG: Using fallback E_ti = {E_ti}")
-
-                            # Branch contribution
-                            try:
-                                print(f"DEBUG: Calculating log_p for branch t={t} to ti={ti}")
-                                log_p = get_log_p(c1, t, ti=ti, E_t=E_t, E_ti=E_ti)
-                                print(f"DEBUG: log_p = {log_p}")
-
-                                if np.isfinite(log_p):
-                                    res += log_p
-                                    print(f"DEBUG: Added branch contribution: {log_p}, running total: {res}")
-                                else:
-                                    print(f"WARNING: Non-finite log_p = {log_p}, skipping")
-                            except Exception as e:
-                                print(f"ERROR: Failed to calculate log_p: {e}")
-
-                # Process root branch
-                if hasattr(tree, TIME) and hasattr(tree, 'dist') and tree.dist > 0:
-                    print(f"DEBUG: Processing root branch for tree {tree_idx + 1}")
-                    root_ti = getattr(tree, TIME)
-                    root_t = root_ti - tree.dist
-                    print(f"DEBUG: Root times: root_t={root_t}, root_ti={root_ti}")
-
-                    # Ensure valid times
-                    original_root_t = root_t
-                    original_root_ti = root_ti
-
-                    root_t = max(0, min(root_t, T - 1e-6))
-                    if root_t != original_root_t:
-                        print(f"DEBUG: Adjusted root_t from {original_root_t} to {root_t}")
-
-                    if root_ti <= root_t:
-                        root_ti = root_t + 1e-6
-                        print(f"DEBUG: root_ti <= root_t, adjusted to {root_ti}")
-
-                    root_ti = min(root_ti, T - 1e-6)
-                    if root_ti != original_root_ti:
-                        print(f"DEBUG: Adjusted root_ti from {original_root_ti} to {root_ti}")
-
-                    # Calculate extinction probabilities
-                    try:
-                        print(f"DEBUG: Calculating E({root_t}) for root")
-                        E_root_t = get_E(c1=c1, c2=c2, t=root_t, T=T)
-                        print(f"DEBUG: E_root_t = {E_root_t}")
-
-                        if not (0 < E_root_t < 1):
-                            print(f"WARNING: Invalid E_root_t = {E_root_t}, adjusting...")
-                            if E_root_t <= 0:
-                                E_root_t = 1e-10
-                            else:  # E_root_t >= 1
-                                E_root_t = 1 - 1e-10
-                            print(f"DEBUG: Adjusted E_root_t = {E_root_t}")
-
-                        print(f"DEBUG: Calculating E({root_ti}) for root tip")
-                        E_root_ti = get_E(c1=c1, c2=c2, t=root_ti, T=T)
-                        print(f"DEBUG: E_root_ti = {E_root_ti}")
-
-                        if not (0 < E_root_ti < 1):
-                            print(f"WARNING: Invalid E_root_ti = {E_root_ti}, adjusting...")
-                            if E_root_ti <= 0:
-                                E_root_ti = 1e-10
-                            else:  # E_root_ti >= 1
-                                E_root_ti = 1 - 1e-10
-                            print(f"DEBUG: Adjusted E_root_ti = {E_root_ti}")
-                    except Exception as e:
-                        print(f"ERROR: Failed to calculate root extinction probabilities: {e}")
-                        E_root_t = E_root_ti = 0.5  # Fallback
-                        print(f"DEBUG: Using fallback values: E_root_t=E_root_ti={E_root_t}")
-
-                    # Root branch contribution
-                    try:
-                        print(f"DEBUG: Calculating log_p for root branch t={root_t} to ti={root_ti}")
-                        log_p = get_log_p(c1, root_t, ti=root_ti, E_t=E_root_t, E_ti=E_root_ti)
-                        print(f"DEBUG: root log_p = {log_p}")
-
-                        if np.isfinite(log_p):
-                            res += log_p
-                            print(f"DEBUG: Added root branch contribution: {log_p}, running total: {res}")
-                        else:
-                            print(f"WARNING: Non-finite root log_p = {log_p}, skipping")
-                    except Exception as e:
-                        print(f"ERROR: Failed to calculate root log_p: {e}")
-
-            # Final validation
-            if not np.isfinite(res):
-                print(f"WARNING: Final result is not finite: {res}, returning penalty")
-                return -1e6 * (1 + np.random.random() * 0.01)
-
-            print(f"DEBUG: Final likelihood: {res}")
-            return res
-
-        except Exception as e:
-            print(f"ERROR in single interval calculation: {e}")
-            return -1e6 * (1 + np.random.random() * 0.01)
-
-    # Multiple intervals
-    print("DEBUG: Using multiple intervals calculation")
-    try:
-        time_points = parameters[3 * n_intervals:]
-        print(f"DEBUG: Time points: {time_points}")
-
-        # Validate time points
-        if not all(time_points[i] < time_points[i + 1] for i in range(len(time_points) - 1)):
-            print(f"WARNING: Time points not in ascending order: {time_points}")
-            return -1e6 * (1 + np.random.random() * 0.01)
-
-        if time_points and time_points[-1] >= T:
-            print(f"WARNING: Last time point {time_points[-1]} >= T ({T})")
-            return -1e6 * (1 + np.random.random() * 0.01)
-
-        # Check for identical parameters
-        all_la_equal = all(abs(la_values[0] - la) < 1e-10 for la in la_values[1:])
-        all_psi_equal = all(abs(psi_values[0] - psi) < 1e-10 for psi in psi_values[1:])
-        all_rho_equal = all(abs(rho_values[0] - rho) < 1e-10 for rho in rho_values[1:])
-
-        if all_la_equal and all_psi_equal and all_rho_equal:
-            print(f"DEBUG: All parameters equal, using single interval calculation")
-            return loglikelihood(forest, la_values[0], psi_values[0], rho_values[0], T=T, threads=threads, u=u,
-                                 n_intervals=1)
-
-        # Build models for each interval
-        models = []
-        print(f"DEBUG: Building model intervals")
-        for i in range(n_intervals - 1):
-            models.append((time_points[i], la_values[i], psi_values[i], rho_values[i]))
-            print(
-                f"DEBUG: Interval {i + 1}: end={time_points[i]}, la={la_values[i]}, psi={psi_values[i]}, rho={rho_values[i]}")
-        models.append((T, la_values[-1], psi_values[-1], rho_values[-1]))
-        print(f"DEBUG: Interval {n_intervals}: end={T}, la={la_values[-1]}, psi={psi_values[-1]}, rho={rho_values[-1]}")
-
-        models = sorted(models, key=lambda x: x[0])
-        print(f"DEBUG: Sorted models: {models}")
-
-        # Check last interval
-        if abs(models[-1][0] - T) > 1e-10:
-            print(f"WARNING: Last model endpoint {models[-1][0]} != T ({T})")
-            return -1e6 * (1 + np.random.random() * 0.01)
-
-        # Helper function
-        def get_model_for_time(t):
-            t = max(0, min(t, T))
-            for i, (interval_end, la, psi, rho) in enumerate(models):
-                if t <= interval_end:
-                    return i, la, psi, rho
-            return len(models) - 1, *models[-1][1:]
-
-        # Initialize arrays
-        intervals = len(models)
-        print(f"DEBUG: Setting up {intervals} intervals")
-        hidden_lk = [0] * intervals
-        c1_values = [0] * intervals
-        c2_values = [0] * intervals
-
-        # Compute c1 values
-        print(f"DEBUG: Computing c1 values for all intervals")
-        for i, (interval_end, la_i, psi_i, rho_i) in enumerate(models):
-            print(f"DEBUG: Interval {i + 1} parameters: la={la_i}, psi={psi_i}, rho={rho_i}")
-
-            # Handle close rates
-            if abs(la_i - psi_i) < 1e-6:
-                print(f"DEBUG: Birth rate ({la_i}) close to death rate ({psi_i}) in interval {i + 1}, adjusting...")
-                diff = max(1e-6, abs(la_i - psi_i) * 1.1)
-                if la_i >= psi_i:
-                    psi_i = la_i - diff
-                else:
-                    la_i = psi_i - diff
-                print(f"DEBUG: Adjusted rates: la={la_i}, psi={psi_i}")
-
-            try:
-                print(f"DEBUG: Calculating c1 for interval {i + 1}")
-                c1_values[i] = get_c1(la=la_i, psi=psi_i, rho=rho_i)
-                print(f"DEBUG: c1[{i + 1}] = {c1_values[i]}")
-            except Exception as e:
-                print(f"ERROR: Failed to calculate c1 for interval {i + 1}: {e}")
-                try:
-                    print(f"DEBUG: Using fallback c1 calculation")
-                    c1_i = (la_i - psi_i) / (la_i - psi_i * (1 - rho_i))
-                    if not np.isfinite(c1_i) or c1_i <= 0:
-                        c1_i = 0.5
-                        print(f"DEBUG: Fallback c1 invalid, using neutral value {c1_i}")
-                    else:
-                        print(f"DEBUG: Fallback c1 = {c1_i}")
-                except Exception as e2:
-                    print(f"ERROR: Fallback c1 calculation failed: {e2}")
-                    c1_i = 0.5
-                    print(f"DEBUG: Using default c1 = {c1_i}")
-                c1_values[i] = c1_i
-
-        # Initialize hidden likelihood for last interval
-        hidden_lk[intervals - 1] = 1.0
-        print(f"DEBUG: Set hidden_lk[{intervals}] = 1.0")
-
-        # Work backward through intervals
-        print(f"DEBUG: Working backward through intervals to calculate c2 values")
-        for i in reversed(range(intervals - 1)):
-            print(f"DEBUG: Processing interval {i + 1}")
-            interval_end, la_i, psi_i, rho_i = models[i]
-
-            try:
-                print(f"DEBUG: Calculating c2 for interval {i + 1}, C={hidden_lk[i + 1]}")
-                c2_values[i] = get_c2(la=la_i, psi=psi_i, c1=c1_values[i], C=hidden_lk[i + 1])
-                print(f"DEBUG: c2[{i + 1}] = {c2_values[i]}")
-            except Exception as e:
-                print(f"ERROR: Failed to calculate c2 for interval {i + 1}: {e}")
-                try:
-                    print(f"DEBUG: Using fallback c2 calculation")
-                    c2_i = hidden_lk[i + 1] / (1 - hidden_lk[i + 1]) if hidden_lk[i + 1] < 1 else 100
-                    if not np.isfinite(c2_i) or c2_i <= 0:
-                        c2_i = 1.0
-                        print(f"DEBUG: Fallback c2 invalid, using neutral value {c2_i}")
-                    else:
-                        print(f"DEBUG: Fallback c2 = {c2_i}")
-                except Exception as e2:
-                    print(f"ERROR: Fallback c2 calculation failed: {e2}")
-                    c2_i = 1.0
-                    print(f"DEBUG: Using default c2 = {c2_i}")
-                c2_values[i] = c2_i
-
-            # Get interval start time
-            prev_time = models[i - 1][0] if i > 0 else 0
-            print(f"DEBUG: Interval {i + 1} start time = {prev_time}")
-
-            try:
-                print(f"DEBUG: Calculating E({prev_time}) for interval start")
-                E_t = get_E(c1=c1_values[i], c2=c2_values[i], t=prev_time, T=interval_end)
-                print(f"DEBUG: E_t = {E_t}")
-
-                if not (0 < E_t < 1):
-                    print(f"WARNING: Invalid E_t = {E_t}, adjusting...")
-                    if E_t <= 0:
-                        E_t = 1e-10
-                    else:  # E_t >= 1
-                        E_t = 1 - 1e-10
-                    print(f"DEBUG: Adjusted E_t = {E_t}")
-
-                hidden_lk[i] = 1.0 - E_t
-                print(f"DEBUG: hidden_lk[{i + 1}] = {hidden_lk[i]}")
-            except Exception as e:
-                print(f"ERROR: Failed to calculate E_t for interval {i + 1}: {e}")
-                hidden_lk[i] = 0.5
-                print(f"DEBUG: Using default hidden_lk[{i + 1}] = {hidden_lk[i]}")
-
-        # Calculate c2 for last interval
-        try:
-            print(f"DEBUG: Calculating c2 for last interval")
-            c2_values[intervals - 1] = get_c2(C=1, la=models[intervals - 1][1],
-                                              psi=models[intervals - 1][2],
-                                              c1=c1_values[intervals - 1])
-            print(f"DEBUG: c2[{intervals}] = {c2_values[intervals - 1]}")
-        except Exception as e:
-            print(f"ERROR: Failed to calculate c2 for last interval: {e}")
-            c2_values[intervals - 1] = 1.0
-            print(f"DEBUG: Using default c2[{intervals}] = {c2_values[intervals - 1]}")
-
-        # Start likelihood calculation
-        res = 0
-        print(f"DEBUG: Starting likelihood calculation, initial value = {res}")
-
-        # Add hidden likelihood contribution
-        hidden_lk_final = hidden_lk[0]
-        print(f"DEBUG: Final hidden_lk = {hidden_lk_final}")
-
-        if 0 < hidden_lk_final < 1:
-            if u < 0:
-                u_val = len(forest) * (1 - hidden_lk_final) / hidden_lk_final
-                print(f"DEBUG: Estimated u = {u_val}")
-                if u_val > 100:
-                    old_u = u_val
-                    u_val = 100 + np.log(u_val - 99)
-                    print(f"DEBUG: Scaled large u from {old_u} to {u_val}")
-            else:
-                u_val = u
-                print(f"DEBUG: Using provided u = {u_val}")
-
-            if u_val > 0:
-                E_0 = 1 - hidden_lk_final
-                print(f"DEBUG: E_0 = {E_0}")
-                if 0 < E_0 < 1:
-                    u_term = u_val * np.log(E_0)
-                    print(f"DEBUG: u_term = {u_term}")
-                    if np.isfinite(u_term):
-                        res += u_term
-                        print(f"DEBUG: Added u_term to likelihood: {res}")
-                    else:
-                        print(f"WARNING: Non-finite u_term = {u_term}, skipping")
-                else:
-                    print(f"WARNING: Invalid E_0 = {E_0}, skipping u_term")
-
-        # Pre-compute log terms
-        log_la_values = [np.log(la) if la > 0 else -1000 for la in la_values]
-        log_psi_values = [np.log(psi) if psi > 0 else -1000 for psi in psi_values]
-        log_rho_values = [np.log(rho) if rho > 0 else -1000 for rho in rho_values]
-
-        print(f"DEBUG: Precomputed log values:")
-        print(f"DEBUG: log_la_values = {log_la_values}")
-        print(f"DEBUG: log_psi_values = {log_psi_values}")
-        print(f"DEBUG: log_rho_values = {log_rho_values}")
-
-        # Process trees
-        for tree_idx, tree in enumerate(forest):
-            print(f"DEBUG: Processing tree {tree_idx + 1}/{len(forest)}")
-
-            # Process nodes
-            node_count = 0
-            for node in tree.traverse('preorder'):
-                node_count += 1
-                t = getattr(node, TIME)
-                original_t = t
-                t = max(0, min(t, T - 1e-6))
-                if t != original_t:
-                    print(f"DEBUG: Adjusted node time from {original_t} to {t}")
-
-                model_idx, la, psi, rho = get_model_for_time(t)
-                print(f"DEBUG: Node at time {t} is in interval {model_idx + 1}")
-
-                log_la = log_la_values[model_idx] if model_idx < len(log_la_values) else -1000
-                log_psi = log_psi_values[model_idx] if model_idx < len(log_psi_values) else -1000
-                log_rho = log_rho_values[model_idx] if model_idx < len(log_rho_values) else -1000
-
-                # Handle leaf
-                if node.is_leaf():
-                    print(f"DEBUG: Processing leaf node {node_count}")
-                    if np.isfinite(log_psi) and np.isfinite(log_rho):
-                        leaf_contribution = log_psi + log_rho
-                        res += leaf_contribution
-                        print(f"DEBUG: Added leaf contribution: {leaf_contribution}, running total: {res}")
-                    else:
-                        print(f"WARNING: Invalid log values for leaf, skipping")
-                else:
-                    # Handle internal node
-                    print(f"DEBUG: Processing internal node {node_count}")
-                    num_children = len(node.children)
-                    print(f"DEBUG: Node has {num_children} children")
-
-                    internal_contribution = log_factorial(num_children)
-                    if np.isfinite(internal_contribution):
-                        res += internal_contribution
-                        print(
-                            f"DEBUG: Added log_factorial({num_children}) = {internal_contribution}, running total: {res}")
-                    else:
-                        print(f"WARNING: Non-finite log_factorial({num_children}), skipping")
-
-                    if np.isfinite(log_la):
-                        la_term = (num_children - 1) * log_la
-                        if np.isfinite(la_term):
-                            res += la_term
-                            print(f"DEBUG: Added (n-1)*log_la = {la_term}, running total: {res}")
-                        else:
-                            print(f"WARNING: Non-finite la_term, skipping")
-
-                        # Process child branches
-                        for child_idx, child in enumerate(node.children):
-                            print(f"DEBUG: Processing child {child_idx + 1}/{num_children}")
-                            ti = getattr(child, TIME)
-                            original_ti = ti
-
-                            # Ensure valid time
-                            if ti <= t:
-                                ti = t + 1e-6
-                                print(f"DEBUG: Child time <= parent time, adjusted from {original_ti} to {ti}")
-                            ti = min(ti, T - 1e-6)
-                            if ti != original_ti:
-                                print(f"DEBUG: Adjusted child time from {original_ti} to {ti}")
-
-                            child_model_idx, _, _, _ = get_model_for_time(ti)
-                            print(f"DEBUG: Child at time {ti} is in interval {child_model_idx + 1}")
-
-                            # Same interval
-                            if model_idx == child_model_idx:
-                                print(f"DEBUG: Same interval branch")
-                                try:
-                                    c1 = c1_values[model_idx]
-                                    c2 = c2_values[model_idx]
-                                    interval_end = models[model_idx][0]
-                                    print(f"DEBUG: Using c1={c1}, c2={c2}, interval_end={interval_end}")
-
-                                    print(f"DEBUG: Calculating E({t}) for branch")
-                                    E_t = get_E(c1=c1, c2=c2, t=t, T=interval_end)
-                                    print(f"DEBUG: E_t = {E_t}")
-
-                                    if not (0 < E_t < 1):
-                                        print(f"WARNING: Invalid E_t = {E_t}, adjusting...")
-                                        if E_t <= 0:
-                                            E_t = 1e-10
-                                        else:  # E_t >= 1
-                                            E_t = 1 - 1e-10
-                                        print(f"DEBUG: Adjusted E_t = {E_t}")
-
-                                    print(f"DEBUG: Calculating E({ti}) for branch end")
-                                    E_ti = get_E(c1=c1, c2=c2, t=ti, T=interval_end)
-                                    print(f"DEBUG: E_ti = {E_ti}")
-
-                                    if not (0 < E_ti < 1):
-                                        print(f"WARNING: Invalid E_ti = {E_ti}, adjusting...")
-                                        if E_ti <= 0:
-                                            E_ti = 1e-10
-                                        else:  # E_ti >= 1
-                                            E_ti = 1 - 1e-10
-                                        print(f"DEBUG: Adjusted E_ti = {E_ti}")
-
-                                    print(f"DEBUG: Calculating log_p for branch")
-                                    log_p = get_log_p(c1, t, ti=ti, E_t=E_t, E_ti=E_ti)
-                                    print(f"DEBUG: log_p = {log_p}")
-
-                                    if np.isfinite(log_p):
-                                        res += log_p
-                                        print(f"DEBUG: Added branch contribution: {log_p}, running total: {res}")
-                                    else:
-                                        print(f"WARNING: Non-finite log_p = {log_p}, skipping")
-                                except Exception as e:
-                                    print(f"ERROR: Failed in same-interval branch calculation: {e}")
-                            else:
-                                # Different intervals - handle crossing
-                                print(
-                                    f"DEBUG: Cross-interval branch from interval {model_idx + 1} to {child_model_idx + 1}")
-                                try:
-                                    current_t = t
-                                    current_model_idx = model_idx
-                                    print(f"DEBUG: Starting at t={current_t} in interval {current_model_idx + 1}")
-
-                                    # Process boundary crossings
-                                    while current_model_idx != child_model_idx:
-                                        print(
-                                            f"DEBUG: Processing crossing from interval {current_model_idx + 1} to {current_model_idx + 2}")
-                                        interval_end, current_la, current_psi, current_rho = models[current_model_idx]
-                                        next_model_idx = current_model_idx + 1
-                                        print(f"DEBUG: Interval {current_model_idx + 1} ends at {interval_end}")
-
-                                        c1 = c1_values[current_model_idx]
-                                        c2 = c2_values[current_model_idx]
-                                        print(f"DEBUG: Using c1={c1}, c2={c2}")
-
-                                        print(f"DEBUG: Calculating E({current_t}) in interval {current_model_idx + 1}")
-                                        E_t = get_E(c1=c1, c2=c2, t=current_t, T=interval_end)
-                                        print(f"DEBUG: E_t = {E_t}")
-
-                                        if not (0 < E_t < 1):
-                                            print(f"WARNING: Invalid E_t = {E_t}, adjusting...")
-                                            if E_t <= 0:
-                                                E_t = 1e-10
-                                            else:  # E_t >= 1
-                                                E_t = 1 - 1e-10
-                                            print(f"DEBUG: Adjusted E_t = {E_t}")
-
-                                        print(f"DEBUG: Calculating E({interval_end}) at boundary")
-                                        E_interval_end = get_E(c1=c1, c2=c2, t=interval_end, T=interval_end)
-                                        print(f"DEBUG: E_interval_end = {E_interval_end}")
-
-                                        if not (0 < E_interval_end < 1):
-                                            print(f"WARNING: Invalid E_interval_end = {E_interval_end}, adjusting...")
-                                            if E_interval_end <= 0:
-                                                E_interval_end = 1e-10
-                                            else:  # E_interval_end >= 1
-                                                E_interval_end = 1 - 1e-10
-                                            print(f"DEBUG: Adjusted E_interval_end = {E_interval_end}")
-
-                                        print(f"DEBUG: Calculating log_p for segment {current_t} to {interval_end}")
-                                        log_p = get_log_p(c1, current_t, ti=interval_end, E_t=E_t, E_ti=E_interval_end)
-                                        print(f"DEBUG: log_p = {log_p}")
-
-                                        if np.isfinite(log_p):
-                                            res += log_p
-                                            print(
-                                                f"DEBUG: Added boundary crossing contribution: {log_p}, running total: {res}")
-                                        else:
-                                            print(f"WARNING: Non-finite log_p = {log_p}, skipping")
-
-                                        # Move to next interval
-                                        current_t = interval_end
-                                        current_model_idx = next_model_idx
-                                        print(f"DEBUG: Moving to interval {current_model_idx + 1} at t={current_t}")
-
-                                    # Final segment within child's interval
-                                    print(f"DEBUG: Processing final segment in interval {current_model_idx + 1}")
-                                    c1 = c1_values[current_model_idx]
-                                    c2 = c2_values[current_model_idx]
-                                    interval_end = models[current_model_idx][0]
-                                    print(f"DEBUG: Using c1={c1}, c2={c2}, interval_end={interval_end}")
-
-                                    print(f"DEBUG: Calculating E({current_t}) for final segment")
-                                    E_t = get_E(c1=c1, c2=c2, t=current_t, T=interval_end)
-                                    print(f"DEBUG: E_t = {E_t}")
-
-                                    if not (0 < E_t < 1):
-                                        print(f"WARNING: Invalid E_t = {E_t}, adjusting...")
-                                        if E_t <= 0:
-                                            E_t = 1e-10
-                                        else:  # E_t >= 1
-                                            E_t = 1 - 1e-10
-                                        print(f"DEBUG: Adjusted E_t = {E_t}")
-
-                                    print(f"DEBUG: Calculating E({ti}) for branch end")
-                                    E_ti = get_E(c1=c1, c2=c2, t=ti, T=interval_end)
-                                    print(f"DEBUG: E_ti = {E_ti}")
-
-                                    if not (0 < E_ti < 1):
-                                        print(f"WARNING: Invalid E_ti = {E_ti}, adjusting...")
-                                        if E_ti <= 0:
-                                            E_ti = 1e-10
-                                        else:  # E_ti >= 1
-                                            E_ti = 1 - 1e-10
-                                        print(f"DEBUG: Adjusted E_ti = {E_ti}")
-
-                                    print(f"DEBUG: Calculating log_p for final segment {current_t} to {ti}")
-                                    log_p = get_log_p(c1, current_t, ti=ti, E_t=E_t, E_ti=E_ti)
-                                    print(f"DEBUG: log_p = {log_p}")
-
-                                    if np.isfinite(log_p):
-                                        res += log_p
-                                        print(f"DEBUG: Added final segment contribution: {log_p}, running total: {res}")
-                                    else:
-                                        print(f"WARNING: Non-finite log_p = {log_p}, skipping")
-                                except Exception as e:
-                                    print(f"ERROR: Failed in cross-interval branch calculation: {e}")
-
-                # Process root branch
-                if hasattr(tree, TIME) and hasattr(tree, 'dist') and tree.dist > 0:
-                    print(f"DEBUG: Processing root branch for tree {tree_idx + 1}")
-                    root_ti = getattr(tree, TIME)
-                    root_t = root_ti - tree.dist
-                    print(f"DEBUG: Root times: root_t={root_t}, root_ti={root_ti}")
-
-                    # Ensure valid times
-                    original_root_t = root_t
-                    original_root_ti = root_ti
-
-                    root_t = max(0, min(root_t, T - 1e-6))
-                    if root_t != original_root_t:
-                        print(f"DEBUG: Adjusted root_t from {original_root_t} to {root_t}")
-
-                    if root_ti <= root_t:
-                        root_ti = root_t + 1e-6
-                        print(f"DEBUG: root_ti <= root_t, adjusted to {root_ti}")
-
-                    root_ti = min(root_ti, T - 1e-6)
-                    if root_ti != original_root_ti:
-                        print(f"DEBUG: Adjusted root_ti from {original_root_ti} to {root_ti}")
-
-                    root_start_model_idx, _, _, _ = get_model_for_time(root_t)
-                    root_end_model_idx, _, _, _ = get_model_for_time(root_ti)
-                    print(
-                        f"DEBUG: Root starts in interval {root_start_model_idx + 1} and ends in interval {root_end_model_idx + 1}")
-
-                    # Same interval
-                    if root_start_model_idx == root_end_model_idx:
-                        print(f"DEBUG: Root branch in single interval {root_start_model_idx + 1}")
-                        try:
-                            c1 = c1_values[root_start_model_idx]
-                            c2 = c2_values[root_start_model_idx]
-                            interval_end = models[root_start_model_idx][0]
-                            print(f"DEBUG: Using c1={c1}, c2={c2}, interval_end={interval_end}")
-
-                            print(f"DEBUG: Calculating E({root_t}) for root")
-                            E_t = get_E(c1=c1, c2=c2, t=root_t, T=interval_end)
-                            print(f"DEBUG: E_root_t = {E_t}")
-
-                            if not (0 < E_t < 1):
-                                print(f"WARNING: Invalid E_root_t = {E_t}, adjusting...")
-                                if E_t <= 0:
-                                    E_t = 1e-10
-                                else:  # E_t >= 1
-                                    E_t = 1 - 1e-10
-                                print(f"DEBUG: Adjusted E_root_t = {E_t}")
-
-                            print(f"DEBUG: Calculating E({root_ti}) for root tip")
-                            E_ti = get_E(c1=c1, c2=c2, t=root_ti, T=interval_end)
-                            print(f"DEBUG: E_root_ti = {E_ti}")
-
-                            if not (0 < E_ti < 1):
-                                print(f"WARNING: Invalid E_root_ti = {E_ti}, adjusting...")
-                                if E_ti <= 0:
-                                    E_ti = 1e-10
-                                else:  # E_ti >= 1
-                                    E_ti = 1 - 1e-10
-                                print(f"DEBUG: Adjusted E_root_ti = {E_ti}")
-
-                            print(f"DEBUG: Calculating log_p for root branch")
-                            log_p = get_log_p(c1, root_t, ti=root_ti, E_t=E_t, E_ti=E_ti)
-                            print(f"DEBUG: root log_p = {log_p}")
-
-                            if np.isfinite(log_p):
-                                res += log_p
-                                print(f"DEBUG: Added root branch contribution: {log_p}, running total: {res}")
-                            else:
-                                print(f"WARNING: Non-finite root log_p = {log_p}, skipping")
-                        except Exception as e:
-                            print(f"ERROR: Failed in single-interval root calculation: {e}")
-                    else:
-                        # Different intervals
-                        print(
-                            f"DEBUG: Root branch crosses intervals from {root_start_model_idx + 1} to {root_end_model_idx + 1}")
-                        try:
-                            current_t = root_t
-                            current_model_idx = root_start_model_idx
-                            print(f"DEBUG: Starting at t={current_t} in interval {current_model_idx + 1}")
-
-                            # Process boundary crossings
-                            while current_model_idx != root_end_model_idx:
-                                print(
-                                    f"DEBUG: Processing crossing from interval {current_model_idx + 1} to {current_model_idx + 2}")
-                                interval_end, current_la, current_psi, current_rho = models[current_model_idx]
-                                next_model_idx = current_model_idx + 1
-                                print(f"DEBUG: Interval {current_model_idx + 1} ends at {interval_end}")
-
-                                c1 = c1_values[current_model_idx]
-                                c2 = c2_values[current_model_idx]
-                                print(f"DEBUG: Using c1={c1}, c2={c2}")
-
-                                print(f"DEBUG: Calculating E({current_t}) in interval {current_model_idx + 1}")
-                                E_t = get_E(c1=c1, c2=c2, t=current_t, T=interval_end)
-                                print(f"DEBUG: E_t = {E_t}")
-
-                                if not (0 < E_t < 1):
-                                    print(f"WARNING: Invalid E_t = {E_t}, adjusting...")
-                                    if E_t <= 0:
-                                        E_t = 1e-10
-                                    else:  # E_t >= 1
-                                        E_t = 1 - 1e-10
-                                    print(f"DEBUG: Adjusted E_t = {E_t}")
-
-                                print(f"DEBUG: Calculating E({interval_end}) at boundary")
-                                E_interval_end = get_E(c1=c1, c2=c2, t=interval_end, T=interval_end)
-                                print(f"DEBUG: E_interval_end = {E_interval_end}")
-
-                                if not (0 < E_interval_end < 1):
-                                    print(f"WARNING: Invalid E_interval_end = {E_interval_end}, adjusting...")
-                                    if E_interval_end <= 0:
-                                        E_interval_end = 1e-10
-                                    else:  # E_interval_end >= 1
-                                        E_interval_end = 1 - 1e-10
-                                    print(f"DEBUG: Adjusted E_interval_end = {E_interval_end}")
-
-                                print(f"DEBUG: Calculating log_p for root segment {current_t} to {interval_end}")
-                                log_p = get_log_p(c1, current_t, ti=interval_end, E_t=E_t, E_ti=E_interval_end)
-                                print(f"DEBUG: log_p = {log_p}")
-
-                                if np.isfinite(log_p):
-                                    res += log_p
-                                    print(
-                                        f"DEBUG: Added root boundary crossing contribution: {log_p}, running total: {res}")
-                                else:
-                                    print(f"WARNING: Non-finite log_p = {log_p}, skipping")
-
-                                # Move to next interval
-                                current_t = interval_end
-                                current_model_idx = next_model_idx
-                                print(f"DEBUG: Moving to interval {current_model_idx + 1} at t={current_t}")
-
-                            # Final segment within root end interval
-                            print(f"DEBUG: Processing final root segment in interval {current_model_idx + 1}")
-                            c1 = c1_values[current_model_idx]
-                            c2 = c2_values[current_model_idx]
-                            interval_end = models[current_model_idx][0]
-                            print(f"DEBUG: Using c1={c1}, c2={c2}, interval_end={interval_end}")
-
-                            print(f"DEBUG: Calculating E({current_t}) for final root segment")
-                            E_t = get_E(c1=c1, c2=c2, t=current_t, T=interval_end)
-                            print(f"DEBUG: E_t = {E_t}")
-
-                            if not (0 < E_t < 1):
-                                print(f"WARNING: Invalid E_t = {E_t}, adjusting...")
-                                if E_t <= 0:
-                                    E_t = 1e-10
-                                else:  # E_t >= 1
-                                    E_t = 1 - 1e-10
-                                print(f"DEBUG: Adjusted E_t = {E_t}")
-
-                            print(f"DEBUG: Calculating E({root_ti}) for root end")
-                            E_ti = get_E(c1=c1, c2=c2, t=root_ti, T=interval_end)
-                            print(f"DEBUG: E_ti = {E_ti}")
-
-                            if not (0 < E_ti < 1):
-                                print(f"WARNING: Invalid E_ti = {E_ti}, adjusting...")
-                                if E_ti <= 0:
-                                    E_ti = 1e-10
-                                else:  # E_ti >= 1
-                                    E_ti = 1 - 1e-10
-                                print(f"DEBUG: Adjusted E_ti = {E_ti}")
-
-                            print(f"DEBUG: Calculating log_p for final root segment {current_t} to {root_ti}")
-                            log_p = get_log_p(c1, current_t, ti=root_ti, E_t=E_t, E_ti=E_ti)
-                            print(f"DEBUG: log_p = {log_p}")
-
-                            if np.isfinite(log_p):
-                                res += log_p
-                                print(f"DEBUG: Added final root segment contribution: {log_p}, running total: {res}")
-                            else:
-                                print(f"WARNING: Non-finite log_p = {log_p}, skipping")
-                        except Exception as e:
-                            print(f"ERROR: Failed in cross-interval root calculation: {e}")
-
-            # Final validation
-            if not np.isfinite(res):
-                print(f"WARNING: Final result is not finite: {res}, returning penalty")
-                penalty = -1e6 * (1 + np.random.random() * 0.01)
-                print(f"DEBUG: Returning penalty value: {penalty}")
-                return penalty
-
-            print(f"DEBUG: Final likelihood: {res}")
-            return res
-
-    except Exception as e:
-        print(f"ERROR in multiple interval calculation: {e}")
-        import traceback
-        traceback.print_exc()
-        penalty = -1e6 * (1 + np.random.random() * 0.01)
-        print(f"DEBUG: Returning penalty value: {penalty}")
-        return penalty
-
+                # La rama cruza límites
+                segments = [root_t] + sorted(boundaries_crossed) + [root_ti]
+                for j in range(len(segments) - 1):
+                    log_lh += calculate_branch_likelihood(segments[j], segments[j + 1])
+
+    return log_lh
 
 def infer_skyline(forest, T, n_intervals=2, la=None, psi=None, p=None, times=None,
                   lower_bounds=DEFAULT_LOWER_BOUNDS, upper_bounds=DEFAULT_UPPER_BOUNDS, ci=False, threads=1,

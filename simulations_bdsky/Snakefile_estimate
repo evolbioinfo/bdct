@@ -30,8 +30,8 @@ max_tips = 1000
 
 rule all:
     input:
-        expand(os.path.join(folder,'trees','final_tree.{i}.nwk'),i=range(100)),
-        expand(os.path.join(folder,'results','param_estimation.{i}.csv'),i=range(100)),
+        expand(os.path.join(folder,'trees','final_tree.{i}.nwk'),i=range(10)),
+        expand(os.path.join(folder,'results','param_estimation.{i}.csv'),i=range(10)),
         os.path.join(folder, 'comparison', 'bdsky_comparison.csv')  # Add this to include the comparison file
 
 rule generate_parameters:
@@ -208,8 +208,8 @@ rule compare_bdsky_estimates:
     Create a comparison table for BDSKY model: actual vs estimated parameters
     '''
     input:
-        tree_logs=expand(os.path.join(folder,'trees','final_tree.{i}.log'),i=range(100)),
-        est_files=expand(os.path.join(folder,'results','param_estimation.{i}.csv'),i=range(100))
+        tree_logs=expand(os.path.join(folder,'trees','final_tree.{i}.log'),i=range(10)),
+        est_files=expand(os.path.join(folder,'results','param_estimation.{i}.csv'),i=range(10))
     output:
         comparison=os.path.join(folder,'comparison','bdsky_comparison.csv')
     params:

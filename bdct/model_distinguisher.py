@@ -88,7 +88,7 @@ def ct_test(forest):
         return 1, n_cherries
 
     random_diffs, real_diffs = get_real_vs_reshuffled_diffs(all_cherries)
-    pval = scipy.stats.binomtest((random_diffs < real_diffs).sum(), n=n_cherries, p=0.5, alternative='less').pvalue
+    pval = scipy.stats.binomtest((random_diffs < real_diffs).sum(), n=n_cherries, p=0.5, alternative='less').pvalue #>#
 
     return pval, n_cherries
 

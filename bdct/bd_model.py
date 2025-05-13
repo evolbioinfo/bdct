@@ -108,6 +108,9 @@ def loglikelihood(forest, la, psi, rho, T, threads=1, u=-1):
         n = len(tree)
         res += n * log_psi_rho
         for n in tree.traverse('preorder'):
+            t = getattr(n, TIME)
+            t = max(0, min(t, T - 1e-6))
+            #             model_idx = get_model_for_time(t)
             if not n.is_leaf():
                 t = getattr(n, TIME)
                 E_t = get_E(c1=c1, c2=c2, t=t, T=T)
