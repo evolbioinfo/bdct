@@ -66,11 +66,11 @@ def get_c1(la, psi, rho):
     return np.power(np.power(la - psi, 2) + 4 * la * psi * rho, 0.5)
 
 
-def get_c2(la, psi, c1):
+def get_c2(la, psi, c1, ci=1):
     """
-    Return c2 = (c1 + la - psi) / (c1 - la + psi)
+    Return c2 = (c1 + la (2ci - 1) - psi) / (c1 - la (2ci - 1) + psi)
     """
-    la_minus_psi = la - psi
+    la_minus_psi = la * (2 * ci - 1) - psi
     return (c1 + la_minus_psi) / (c1 - la_minus_psi)
 
 
