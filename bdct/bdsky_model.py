@@ -98,10 +98,15 @@ def times_to_frequencies(skyline_times):
     :return: np.array containing n - 1 frequencies f_2, f_{n} each between 0 and 1,
         such that the 1st frequency f_1 = 1 - sum_2^n f_i.
     """
+    frequencies = np.zeros(len(skyline_times) - 1)
+    start_t = 0
+    for (idx, st) in enumerate(skyline_times[:-1]):
+        # this time as proportion of the time left till the tree end
+        frequencies[idx] = (st - start_t) / (skyline_times[-1] - start_t)
+        start_t = st
+    return frequencies
 
-    return np.array(skyline_times[1:] - skyline_times[:-1]) / skyline_times[-1]
-
-def frequencies_to_times(frequencies, T):
+def frequencies_to_times(skyline_time_fractions, T):
     """
     Converts frequencies (fractions of the total time) used for optimization to skyline times [t_1, ..., t_{n-1}, T].
     f_i = (t_i - t_{i-1}) / T, where t_0 = 0.
@@ -111,12 +116,16 @@ def frequencies_to_times(frequencies, T):
     :return: np.array containing n skyline change times [t_1, ..., t_{n-1}, T],
         the last time being the end of the sampling period T
     """
-    skyline_times = np.zeros(len(frequencies) + 1)
-    skyline_times[:-1] = frequencies
-    skyline_times[-1] = 1 - frequencies.sum()
-    skyline_times *= T
-    for i in range(1, len(skyline_times)):
-        skyline_times[i] += skyline_times[i - 1]
+
+    # the skyline times are specified as:
+    # the first one t1 as a fraction of total time (between 0 and T): t1 / T,
+    # the second one t2 as a fraction of time between t1 and T: (t2 - t1) / (T - t1), etc.
+    skyline_times = np.zeros(len(skyline_time_fractions) + 1)
+    skyline_times[-1] = T
+    t_start = 0
+    for i, fraction in enumerate(skyline_time_fractions):
+        skyline_times[i] = t_start + (T - t_start) * fraction
+        t_start = skyline_times[i]
     return skyline_times
 
 
@@ -165,11 +174,12 @@ def infer(forest, T, la=None, psi=None, p=None, skyline_times=None,
     n_t = 0
     if isinstance(skyline_times, list) or isinstance(skyline_times, np.ndarray):
         n_t = len(skyline_times)
+        skyline_times = np.concatenate((skyline_times, [T]))
     elif skyline_times is not None:
-        skyline_times = [skyline_times]
+        skyline_times = [skyline_times, T]
         n_t = 1
     else:
-        skyline_times = []
+        skyline_times = [T]
 
     if n_t and n_t != n_intervals - 1:
         raise ValueError(f'The skyline times should specify times at which the model changes, '
@@ -182,6 +192,9 @@ def infer(forest, T, la=None, psi=None, p=None, skyline_times=None,
 
     for (t1, t2) in zip(skyline_times[:-1], skyline_times[1:]):
         if t1 >= t2:
+            if t2 == T:
+                raise ValueError(
+                    f'The specified skyline change time {t1} is outside of the given forest sampling period 0-{T}.')
             raise ValueError(f'The skyline times should specify times at which the model changes and should be sorted, '
                              f'while you specified {t2} after {t1}.')
 
@@ -212,12 +225,8 @@ def infer(forest, T, la=None, psi=None, p=None, skyline_times=None,
     if n_intervals - 1:
         start_parameters[n_intervals * 3: ] = 1 / n_intervals
         if n_t:
-            start_t = 0
-            for (idx, st) in enumerate(skyline_times):
-                # this time as proportion of the time left till the tree end
-                start_parameters[n_intervals * 3 + idx] = (st - start_t) / (T - start_t)
-                input_params[n_intervals * 3 + idx] = (st - start_t) / (T - start_t)
-                start_t = st
+            start_parameters[n_intervals * 3: ] = times_to_frequencies(skyline_times)
+            input_params[n_intervals * 3: ] = start_parameters[n_intervals * 3: ]
 
     best_vs, best_lk = np.array(start_parameters), loglikelihood(forest, *start_parameters, T=T, threads=threads)
 
@@ -261,21 +270,12 @@ def save_results(vs, cis, T, log, ci=False):
     # the first one t1 as a fraction of total time (between 0 and T): t1 / T,
     # the second one t2 as a fraction of time between t1 and T: (t2 - t1) / (T - t1), etc.
     skyline_time_fractions = vs[n_intervals * 3:]
-    skyline_times = np.zeros(len(skyline_time_fractions))
-    t_start = 0
-    for i, fraction in enumerate(skyline_time_fractions):
-        skyline_times[i] = t_start + (T - t_start) * fraction
-        t_start = skyline_times[i]
+    skyline_times = frequencies_to_times(skyline_time_fractions, T)
 
     if ci:
         skyline_time_fraction_cis = cis[n_intervals * 3:, :]
-        skyline_time_cis = np.zeros((len(skyline_time_fraction_cis), 2))
-        t_start = 0
-        for i in range(n_intervals - 1):
-            fraction_min, fraction_max = skyline_time_fraction_cis[i, :]
-            skyline_time_cis[i, 0] = t_start + (T - t_start) * fraction_min
-            skyline_time_cis[i, 1] = t_start + (T - t_start) * fraction_max
-            t_start = skyline_times[i]
+        skyline_time_cis = np.array([frequencies_to_times(skyline_time_fraction_cis[:, 0], T),
+                                     frequencies_to_times(skyline_time_fraction_cis[:, 1], T)]).T
 
 
     os.makedirs(os.path.dirname(os.path.abspath(log)), exist_ok=True)
@@ -288,12 +288,12 @@ def save_results(vs, cis, T, log, ci=False):
             la, psi, rho = la_array[i], psi_array[i], rho_array[i]
             R0 = la / psi
             rt = 1 / psi
-            t = skyline_times[i] if i < (n_intervals - 1) else T
+            t = skyline_times[i]
             value_line = ",".join(f'{_:g}' for _ in [R0, rt, rho, la, psi, t])
             f.write(f"{i},value,{value_line}\n")
             if ci:
                 (la_min, la_max), (psi_min, psi_max), (rho_min, rho_max) = la_ci_array[i, :], psi_ci_array[i, :], rho_ci_array[i, :]
-                t_min, t_max = skyline_time_cis[i, :] if i < (n_intervals - 1) else (T, T)
+                t_min, t_max = skyline_time_cis[i, :]
                 R0_min, R0_max = la_min / psi, la_max / psi
                 rt_min, rt_max = 1 / psi_max, 1 / psi_min
                 ci_min_line = ",".join(f'{_:g}' for _ in [R0_min, rt_min, rho_min, la_min, psi_min, t_min])
@@ -313,11 +313,7 @@ def format_parameters(*params, T, fixed=None, epi=True):
     # the first one t1 as a fraction of total time (between 0 and T): t1 / T,
     # the second one t2 as a fraction of time between t1 and T: (t2 - t1) / (T - t1), etc.
     skyline_time_fractions = params[n_intervals * 3:]
-    skyline_times = np.zeros(len(skyline_time_fractions))
-    t_start = 0
-    for i, fraction in enumerate(skyline_time_fractions):
-        skyline_times[i] = t_start + (T - t_start) * fraction
-        t_start = skyline_times[i]
+    skyline_times = frequencies_to_times(skyline_time_fractions, T)
 
 
     names = np.concatenate([PARAMETER_NAMES, EPI_PARAMETER_NAMES]) if epi else PARAMETER_NAMES
@@ -445,12 +441,8 @@ def loglikelihood_main():
                              f'while you specified {t2} after {t1}.')
 
     # Convert skyline times to fractions of total time between the interval start and the tree end
-    start_t = 0
-    for idx in range(n_t):
-        # this time as proportion of the time left till the tree end
-        skyline_time = params.skyline_times[idx]
-        params.skyline_times[idx] = (skyline_time - start_t) / (T - start_t)
-        start_t = skyline_time
+    if n_t:
+        params.skyline_times = times_to_frequencies(np.concatenate((params.skyline_times, [T])))
 
 
     lk = loglikelihood(forest, **vars(params), T=T)
