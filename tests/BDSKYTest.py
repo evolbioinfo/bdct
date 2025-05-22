@@ -4,6 +4,7 @@ import unittest
 import numpy as np
 
 from bdct import bd_model, bdsky_model
+from bdct.bdsky_model import time_intervals2optimized_values, optimized_values2time_intervals
 from bdct.tree_manager import get_T, annotate_forest_with_time, read_forest
 
 NWK = os.path.join(os.path.dirname(__file__), 'data', 'tree.bd.nwk')
@@ -23,6 +24,16 @@ la, psi = R0 / d, 1 / d
 
 
 class BDSKYTest(unittest.TestCase):
+
+
+    def test_times2optimized_values2times(self):
+
+        skyline_times = np.array([1, 3, 10])
+        frequencies = time_intervals2optimized_values(skyline_times)
+        skyline_times2 = optimized_values2time_intervals(frequencies, T=skyline_times[-1])
+        for (st, st2) in zip(skyline_times, skyline_times2):
+            self.assertAlmostEqual(st, st2, 6)
+
 
     def test_bd_lk_vs_bdsky_lk(self):
         """
