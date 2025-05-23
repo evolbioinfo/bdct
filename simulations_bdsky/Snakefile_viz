@@ -1,0 +1,41 @@
+import os
+
+# To run locally:
+# snakemake --snakefile Snakefile_viz --keep-going --cores 7 --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
+
+
+
+localrules: all
+
+
+os.makedirs('logs', exist_ok=True)
+
+
+folder = config.get("folder", '.')
+M = int(config.get('max', 1000))
+
+
+rule all:
+    input:
+        os.path.join(folder, 'trees', 'errors.svg'),
+
+
+rule plot_errors:
+    '''
+    Plots the errors.
+    '''
+    input:
+        tab = os.path.join(folder, 'trees', 'estimates.tab'),
+    output:
+        pdf = os.path.join(folder, 'trees', 'errors.svg'),
+        tab = os.path.join(folder, 'trees', 'errors.tab'),
+    params:
+        mem = 2000,
+        name = 'errors',
+        qos = 'fast'
+    threads: 1
+    singularity: "docker://evolbioinfo/python-evol:v3.6richer.2"
+    shell:
+        """
+        python3 py/plot_error.py --estimates {input.tab} --tab {output.tab} --pdf {output.pdf} 
+        """

@@ -1,0 +1,101 @@
+import os
+
+# To run locally:
+# snakemake --snakefile Snakefile_lk --keep-going --cores 7 --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
+
+
+
+localrules: all
+
+os.makedirs('logs', exist_ok=True)
+
+
+folder = config.get("folder", '.')
+n = int(config.get("num", 100))
+REPETITIONS = list(range(n))
+M = int(config.get('max', 1000))
+EST_ML = ['bd', 'bdct']
+
+
+rule all:
+    input:
+        expand(os.path.join(folder, 'trees', 'likelihood_stats_{bdsky}.txt'), bdsky=['bdsky', 'bdsky_t'])
+
+
+rule likelihood_bdsky:
+    '''
+    Calculate likelihood value for estimated parameters.
+    '''
+    input:
+        log = os.path.join(folder, 'trees', '{type}.{i}.est_{bdsky}'),
+        nwk = os.path.join(folder, 'trees', '{type}.{i}.nwk'),
+    output:
+        lk = os.path.join(folder, 'trees', '{type,tree|forest}.{i}.lk_{bdsky}'),
+    params:
+        mem = 2000,
+        name = 'lk_{i}_bdct',
+        qos = 'fast',
+    threads: 1
+    singularity: "docker://evolbioinfo/bdct:v0.1.25"
+    shell:
+        """
+        # interval,type,R0,infectious time,sampling probability,transmission rate,removal rate,time at interval end
+        la1=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $6 }}'`
+        psi1=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $7 }}'`
+        p1=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $5 }}'`
+        T1=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $8 }}'`
+        la2=`head -n 5 {input.log} | tail -n 1 | awk -F',' '{{ print $6 }}'`
+        psi2=`head -n 5 {input.log} | tail -n 1 | awk -F',' '{{ print $7 }}'`
+        p2=`head -n 5 {input.log} | tail -n 1 | awk -F',' '{{ print $5 }}'`
+        
+        bdsky_loglikelihood --nwk {input.nwk} --la $la1 $la2 --psi $psi1 $psi2 --p $p1 $p2 --skyline_times $T1 > {output.lk}
+        """
+
+rule likelihood_real:
+    '''
+    Calculate likelihood value for real parameters.
+    '''
+    input:
+        log = os.path.join(folder, 'trees', '{type}.{i}.log'),
+        nwk = os.path.join(folder, 'trees', '{type}.{i}.nwk'),
+    output:
+        lk = os.path.join(folder, 'trees', '{type,tree|forest}.{i}.lk_real'),
+    params:
+        mem = 2000,
+        name = 'lk_{i}_bdct_real',
+        qos = 'fast',
+    threads: 1
+    singularity: "docker://evolbioinfo/bdct:v0.1.26"
+    shell:
+        """       
+        # R_I,d_I,la_II,p_I,psi_I,tips,hidden_trees,end_time
+        la1=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $3 }}'`
+        psi1=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $5 }}'`
+        p1=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $4 }}'`
+        T1=`head -n 2 {input.log} | tail -n 1 | awk -F',' '{{ print $8 }}'`
+        la2=`head -n 3 {input.log} | tail -n 1 | awk -F',' '{{ print $3 }}'`
+        psi2=`head -n 3 {input.log} | tail -n 1 | awk -F',' '{{ print $5 }}'`
+        p2=`head -n 3 {input.log} | tail -n 1 | awk -F',' '{{ print $4 }}'`
+        
+        bdsky_loglikelihood --nwk {input.nwk} --la $la1 $la2 --psi $psi1 $psi2 --p $p1 $p2 --skyline_times $T1 > {output.lk}
+        """
+
+rule likelihood_stats:
+    '''
+    Calculate likelihood values for estimated parameters.
+    '''
+    input:
+        lk = expand(os.path.join(folder, 'trees', 'tree.{i}.lk_{{bdsky}}'), i=REPETITIONS),
+        lk_real = expand(os.path.join(folder, 'trees', 'tree.{i}.lk_real'), i=REPETITIONS),
+    output:
+        stats = os.path.join(folder, 'trees', 'likelihood_stats_{bdsky}.txt'),
+    params:
+        mem = 2000,
+        name = 'likelihoods',
+        qos = 'fast'
+    threads: 1
+    singularity: "docker://evolbioinfo/bdct:v0.1.26"
+    shell:
+        """
+        python3 py/likelihood_stats.py --likelihoods_est {input.lk} --likelihoods_real {input.lk_real} --log {output.stats}
+        """

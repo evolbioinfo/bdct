@@ -1,0 +1,55 @@
+import os
+
+# To run locally:
+## with singularity (a.k.a apptainer)
+###  to install apptainer, run the dollowing commands in the Terminal:
+###  cd /tmp
+###  wget https://github.com/apptainer/apptainer/releases/download/v1.4.0/apptainer_1.4.0_amd64.deb
+###  sudo apt install -y ./apptainer_1.4.0_amd64.deb
+## snakemake --snakefile Snakefile_simulate --keep-going --cores 8 --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
+##
+## without singularity
+## snakemake --snakefile Snakefile_simulate --keep-going --cores 8
+
+##to run: snakemake --snakefile Snakefile_simulate --config num_models=2 --keep-going --cores 8 --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
+
+localrules: all
+
+# by default the folder will be the same one where Snakemake is located
+folder = config.get("folder",'.')
+
+# Get the number of models from config, default to 2
+num_models = int(config.get("num_models", 2))
+if num_models < 1 or num_models > 10:
+    print(f"Warning: num_models must be between 1 and 10, got {num_models}. Setting to 2.")
+    num_models = 2
+
+# Define minimum and maximum number of tips
+min_tips = 500
+max_tips = 1000
+
+rule all:
+    input:
+        expand(os.path.join(folder, 'trees', 'tree.{i}.nwk'), i=range(100)),
+
+rule generate_tree:
+    '''
+    Generate BDSKY(2) trees
+    '''
+    output:
+        log=os.path.join(folder,'trees', 'tree.{i}.log'),
+        nwk=os.path.join(folder,'trees', 'tree.{i}.nwk'),
+    params:
+        mem=1000,
+        name='tree.{i}',
+        qos='fast'
+    threads: 1
+    singularity: "docker://evolbioinfo/treesimulator:v0.2.17"
+    shell:
+        """
+        # Generate parameters for N models
+        python3 py/generate_tree.py --log {output.log} --nwk {output.nwk} \
+            --min_R 1 --max_R 10 --min_rho 0.05 --max_rho 0.75 --min_d 0.5 --max_d 21 \
+            --min_intervals {num_models} --max_intervals {num_models} \
+            --min_tips {min_tips} --max_tips {max_tips}
+        """

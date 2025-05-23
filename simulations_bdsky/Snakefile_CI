@@ -1,0 +1,40 @@
+import os
+
+# To run locally:
+# snakemake --snakefile Snakefile_CI --keep-going --cores 7 --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
+
+
+
+localrules: all
+
+
+os.makedirs('logs', exist_ok=True)
+
+
+folder = config.get("folder", '.')
+M = int(config.get('max', 1000))
+
+
+rule all:
+    input:
+        expand(os.path.join(folder, 'trees', 'CI_stats.txt'), n=[0, 1, 2, M]),
+
+
+rule CI_stats:
+    '''
+    Calculate CI stats for estimated parameters.
+    '''
+    input:
+        tab = os.path.join(folder, 'trees', 'estimates.tab'),
+    output:
+        stats = os.path.join(folder, 'trees', 'CI_stats.txt'),
+    params:
+        mem = 2000,
+        name = 'CIs',
+        qos = 'fast',
+    threads: 1
+    singularity: "docker://evolbioinfo/python-evol:v3.6richer.2"
+    shell:
+        """
+        python3 py/assess_CIs.py --estimates {input.tab} --log {output.stats}
+        """

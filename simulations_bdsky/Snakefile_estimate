@@ -1,0 +1,92 @@
+import os
+
+# To run locally:
+# snakemake --snakefile Snakefile_estimate --keep-going --cores 7 --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
+
+
+localrules: all
+
+os.makedirs('logs', exist_ok=True)
+
+
+folder = config.get("folder", '.')
+num = int(config.get("num", 100))
+REPETITIONS = list(range(num))
+ci = "--ci"
+# ci = ""
+os.makedirs(os.path.join(folder, 'logs'), exist_ok=True)
+
+rule all:
+    input:
+        os.path.join(folder, 'trees', 'estimates.tab')
+
+
+rule estimate_params_bdsky:
+    '''
+    Estimate parameters.
+    '''
+    input:
+        nwk = os.path.join(folder, 'trees', '{type}.{i}.nwk'),
+        log = os.path.join(folder, 'trees', '{type}.{i}.log'),
+    output:
+        est = os.path.join(folder, 'trees', '{type,tree|forest}.{i}.est_bdsky'),
+    params:
+        mem = 2000,
+        name = 'bdsky{i}',
+        qos = 'fast'
+    threads: 1
+    singularity: "docker://evolbioinfo/bdct:v0.1.25"
+    shell:
+        """
+        p1=`awk -F, ' NR == 1 {{ for (i = 1; i <= $NF; i++) {{ if ($i == "p_I") {{ col = i; break }} }} }} NR == 2 {{ print $col }} ' {input.log}`
+        p2=`awk -F, ' NR == 1 {{ for (i = 1; i <= $NF; i++) {{ if ($i == "p_I") {{ col = i; break }} }} }} NR == 3 {{ print $col }} ' {input.log}`
+        bdsky_infer --p $p1 $p2  --nwk {input.nwk} --log {output.est} {ci}
+        """
+
+rule estimate_params_bdsky_t_fixed:
+    '''
+    Estimate parameters.
+    '''
+    input:
+        nwk = os.path.join(folder, 'trees', '{type}.{i}.nwk'),
+        log = os.path.join(folder, 'trees', '{type}.{i}.log'),
+    output:
+        est = os.path.join(folder, 'trees', '{type,tree|forest}.{i}.est_bdsky_t'),
+    params:
+        mem = 2000,
+        name = 'bdsky{i}',
+        qos = 'fast'
+    threads: 1
+    singularity: "docker://evolbioinfo/bdct:v0.1.25"
+    shell:
+        """
+        p1=`awk -F, ' NR == 1 {{ for (i = 1; i <= $NF; i++) {{ if ($i == "p_I") {{ col = i; break }} }} }} NR == 2 {{ print $col }} ' {input.log}`
+        p2=`awk -F, ' NR == 1 {{ for (i = 1; i <= $NF; i++) {{ if ($i == "p_I") {{ col = i; break }} }} }} NR == 3 {{ print $col }} ' {input.log}`
+        T1=`awk -F, ' NR == 1 {{ for (i = 1; i <= $NF; i++) {{ if ($i == "end_time") {{ col = i; break }} }} }} NR == 2 {{ print $col }} ' {input.log}`
+        bdsky_infer --p $p1 $p2  --skyline_times $T1 --nwk {input.nwk} --log {output.est} {ci}
+        """
+
+
+rule combine_estimates:
+    '''
+    Combine estimates.
+    '''
+    input:
+        log = expand(os.path.join(folder, 'trees', 'tree.{i}.log'), i=REPETITIONS),
+        est_bdsky = expand(os.path.join(folder, 'trees', 'tree.{i}.est_bdsky'), i=REPETITIONS),
+        est_bdsky_t = expand(os.path.join(folder, 'trees', 'tree.{i}.est_bdsky_t'), i=REPETITIONS)
+    output:
+        tab = os.path.join(folder, 'trees', 'estimates.tab'),
+    params:
+        mem = 2000,
+        name = 'estimates',
+        qos = 'fast',
+    threads: 1
+    singularity: "docker://evolbioinfo/python-evol:v3.6richer.2"
+    shell:
+        """
+        python3 py/summary_table.py --real {input.log} \
+        --estimates_bdsky {input.est_bdsky} \
+        --estimates_bdsky_t {input.est_bdsky_t} \
+        --tab {output.tab}
+        """
