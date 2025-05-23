@@ -94,7 +94,8 @@ def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_functi
             if num_attemps > 1:
                 print(f'Starting parameters: {formatter(get_real_params_from_optimised(vs))}')
 
-        fres = minimize(get_v, x0=vs, method='L-BFGS-B', bounds=optimised_bounds)
+        # fres = minimize(get_v, x0=vs, method='L-BFGS-B', bounds=optimised_bounds)
+        fres = minimize(get_v, x0=vs, method='SLSQP', bounds=optimised_bounds, options={'maxiter': 100000})
         if fres.success and not np.any(np.isnan(fres.x)):
             successful_attempts += 1
             if -fres.fun >= best_log_lh:
@@ -126,7 +127,7 @@ def estimate_cis(T, forest, input_parameters, loglikelihood_function, optimised_
 
     n_optimized_params = len(input_parameters[~fixed_parameter_mask])
     print(f'Estimating CIs for {n_optimized_params} free parameters...')
-    lk_threshold = (loglikelihood_function(forest, *optimised_parameters, T, threads=threads)
+    lk_threshold = (loglikelihood_function(forest, *optimised_parameters, T=T, threads=threads)
                     - get_chi2_threshold(num_parameters=n_optimized_params))
 
     def binary_search(v_min, v_max, get_lk, lower=True):
@@ -155,7 +156,8 @@ def estimate_cis(T, forest, input_parameters, loglikelihood_function, optimised_
         def get_lk(v):
             rps[i] = v
             ip[i] = v
-            return optimize_likelihood_params(forest, T, ip, loglikelihood_function,
+            return optimize_likelihood_params(forest, T=T, input_parameters=ip,
+                                              loglikelihood_function=loglikelihood_function,
                                               bounds=optimised_cis, start_parameters=rps,
                                               threads=threads, num_attemps=1,
                                               optimise_as_logs=optimise_as_logs)[-1]
