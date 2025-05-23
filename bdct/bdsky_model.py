@@ -9,6 +9,8 @@ from bdct.formulas import get_c1, get_c2, get_E, get_log_p, get_u, log_factorial
 from bdct.parameter_estimator import optimize_likelihood_params, estimate_cis
 from bdct.tree_manager import TIME, read_forest, annotate_forest_with_time, get_T
 
+GRID_SIZE = 11
+
 INTERVAL_END_TIME = 'time at interval end'
 INTERVAL = 'interval'
 
@@ -283,7 +285,7 @@ def optimize_current_setting(bounds, n_intervals, start_parameters, input_params
         bs = np.array(bounds)
         i = len(input_params) - n_times_to_optimize
         lb, up = bs[i]
-        step = (up - lb) / 12
+        step = (up - lb) / GRID_SIZE
         grid_values = np.arange(lb + step, up, step=step)
         best_interval_idx = None
         best_lk = loglikelihood(forest, *start_parameters, T=T, threads=threads)
@@ -505,12 +507,14 @@ def loglikelihood_main():
             raise ValueError(f'The skyline times should specify times at which the model changes and should be sorted, '
                              f'while you specified {t2} after {t1}.')
 
-    # Convert skyline times to fractions of total time between the interval start and the tree end
+    ps = np.zeros(n_intervals * 3 + n_intervals - 1)
+    ps[0:n_intervals * 3:3] = params.la
+    ps[1:n_intervals * 3:3] = params.psi
+    ps[2:n_intervals * 3:3] = params.p
     if n_t:
-        params.skyline_times = time_intervals2optimized_values(np.concatenate((params.skyline_times, [T])))
+        ps[n_intervals * 3:] = time_intervals2optimized_values(np.concatenate((params.skyline_times, [T])))
 
-
-    lk = loglikelihood(forest, **vars(params), T=T)
+    lk = loglikelihood(forest, *ps, T=T)
     print(lk)
 
 
