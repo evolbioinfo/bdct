@@ -1,0 +1,63 @@
+import os
+
+# To run locally:
+# snakemake --snakefile Snakefile_bdei_test --keep-going --cores 7 --config sf=small --use-singularity --singularity-prefix ~/.singularity --singularity-args "--home ~"
+# To run on maestro
+# source ~/.bashrc && conda activate snakemake && module load apptainer && cd /pasteur/zeus/projets/p01/Evolbioinfo/users/azhukova/projects/bdext/simulations_bdei
+# snakemake --snakefile Snakefile_bdei_test --config sf=small --keep-going --cores 1 --use-singularity --singularity-prefix $HOME/.singularity --singularity-args "-B /pasteur" --cluster "sbatch -c {threads} -o {folder}/logs/{params.name}.log -e {folder}/logs/{params.name}.log --mem {params.mem} -p common --qos={params.qos}  -A bioevo -J {params.name}" --jobs 300
+
+snakemake_settings = "  --keep-going --cores 1 --jobs 500 --rerun-incomplete --cluster  \"sbatch -c {threads} -o {folder}/logs/{params.name}.log -e {folder}/logs/{params.name}.log --mem {params.mem} -p common --qos={params.qos}  -A bioevo -J {params.name}\"  --use-singularity --singularity-prefix \"$HOME/.singularity\" --singularity-args \"-B /pasteur\" "
+
+localrules: all
+
+folder = config.get("folder", '')
+num = int(config.get("num", 100))
+REPETITIONS = list(range(num))
+M = int(config.get('max', 1000))
+
+MODELS = ['BDCT0', 'BDEICT0']
+
+os.makedirs('logs', exist_ok=True)
+
+rule all:
+    input:
+        os.path.join(folder, 'bdei_tests.tab')
+
+rule bdei_test:
+    '''
+    BDEI-test on a given tree/forest.
+    '''
+    input:
+        nwk=os.path.join(folder,'{model}','tree.{i}.nwk')
+    output:
+        log=os.path.join(folder,'{model}','tree.{i}.bdei_test'),
+    params:
+        mem=2000,
+        name='bdei_{i}',
+        qos='fast'
+    threads: 1
+    singularity: "docker://evolbioinfo/bdct:v0.1.25"
+    shell:
+        """
+        python3 /home/alejandra/NEWSNAKE/bdct/bdei_distinguisher.py --nwk {input.nwk} --log {output.log}
+        """
+
+rule combine_bdei:
+    '''
+    Combine BDEI test results.
+    '''
+    input:
+        log = expand(os.path.join(folder, '{model}', 'tree.{i}.bdei_test'),
+                    i=REPETITIONS, model=MODELS)
+    output:
+        tab = os.path.join(folder, 'bdei_tests.tab'),
+    params:
+        mem = 2000,
+        name = 'combine_bdei',
+        qos = 'fast',
+    threads: 1
+    singularity: "docker://evolbioinfo/pastml:v1.9.43"
+    shell:
+        """
+        python3 py/summary_table_bdei.py --logs {input.log} --tab {output.tab}
+        """
