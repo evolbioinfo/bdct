@@ -12,18 +12,13 @@ num = int(config.get("num", 100))
 REPETITIONS = list(range(num))
 os.makedirs('logs', exist_ok=True)
 
-m, M = int(config.get('min', 500)), int(config.get('max', 1000))
-MODELS = ['BDCT', 'BDEICT', 'BDSSCT']
+m, M = int(config.get('min', 2000)), int(config.get('max', 5000))
+MODELS = ['BDCT', 'BDEICT']
 
 rule all:
     input:
         expand(os.path.join(folder, '{model}{n}', 'tree.{i}.nwk'), i=REPETITIONS, \
-            n=[0, 1, 2, M], k=range(0, 100), model=MODELS),
-    shell:
-        """
-        snakemake --snakefile Snakefile_estimate --keep-going --cores 12 --config num={num} sf={folder} --unlock 2> /dev/null
-        snakemake --snakefile Snakefile_estimate --keep-going --cores 12 --config num={num} sf={folder}
-        """
+            n=[0], k=range(0, 100), model=MODELS),
 
 
 rule simulate_bdct_tree:
