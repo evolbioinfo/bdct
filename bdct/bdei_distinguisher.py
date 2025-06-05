@@ -68,7 +68,7 @@ def pick_cherries(tree, include_polytomies=True, cherry_type="tip"):
                 yield ParentChildrenMotif(clustered_children=internal_nodes, root=node)
 
 
-def bdei_test(forest):
+def bdei_test(forest, cherry_strategy="both"):
     """
     Tests if the input forest was generated under a -BDEI model.
 
@@ -76,51 +76,62 @@ def bdei_test(forest):
     For each cherry the test calculates the difference between its tip times,
     hence obtaining an array of cherry tip differences.
 
-    Extended version: processes tip cherries and internal cherries SEPARATELY to avoid
-    mixing different biological interpretations (sampling vs transmission times).
+    Extended version: allows testing different cherry strategies to compare performance.
 
     :param forest: list of trees
+    :param cherry_strategy: "tips_only", "internal_only", or "both"
     :return: pval, n_cherries
     """
     annotate_forest_with_time(forest)
 
-    # Process tip cherries separately
-    tip_cherries = []
-    for tree in forest:
-        tip_cherries.extend(pick_cherries(tree, include_polytomies=True, cherry_type="tip"))
-    tip_cherries = sorted(tip_cherries, key=lambda _: getattr(_.root, TIME))
+    # Initialize arrays for different cherry types
+    c_tips = np.array([], dtype=bool)
+    c_inodes = np.array([], dtype=bool)
+    n_tip_cherries = 0
+    n_internal_cherries = 0
 
-    # Process internal cherries separately
-    internal_cherries = []
-    for tree in forest:
-        internal_cherries.extend(pick_cherries(tree, include_polytomies=True, cherry_type="internal"))
-    internal_cherries = sorted(internal_cherries, key=lambda _: getattr(_.root, TIME))
+    # Process tip cherries if needed
+    if cherry_strategy in ["tips_only", "both"]:
+        tip_cherries = []
+        for tree in forest:
+            tip_cherries.extend(pick_cherries(tree, include_polytomies=True, cherry_type="tip"))
+        tip_cherries = sorted(tip_cherries, key=lambda _: getattr(_.root, TIME))
+        n_tip_cherries = len(tip_cherries)
 
-    n_tip_cherries = len(tip_cherries)
-    n_internal_cherries = len(internal_cherries)
-    n_total_cherries = n_tip_cherries + n_internal_cherries
+        if n_tip_cherries >= 2:
+            random_diffs_tips, real_diffs_tips = get_real_vs_reshuffled_diffs(tip_cherries)
+            c_tips = random_diffs_tips > real_diffs_tips
 
-    logging.info(f'Picked {n_total_cherries} cherries total: {n_tip_cherries} tip, {n_internal_cherries} internal.')
+    # Process internal cherries if needed
+    if cherry_strategy in ["internal_only", "both"]:
+        internal_cherries = []
+        for tree in forest:
+            internal_cherries.extend(pick_cherries(tree, include_polytomies=True, cherry_type="internal"))
+        internal_cherries = sorted(internal_cherries, key=lambda _: getattr(_.root, TIME))
+        n_internal_cherries = len(internal_cherries)
 
-    if n_total_cherries < 2:
+        if n_internal_cherries >= 2:
+            random_diffs_internal, real_diffs_internal = get_real_vs_reshuffled_diffs(internal_cherries)
+            c_inodes = random_diffs_internal > real_diffs_internal
+
+    # Combine arrays based on strategy
+    if cherry_strategy == "tips_only":
+        c_combined = c_tips
+        n_total_cherries = n_tip_cherries
+    elif cherry_strategy == "internal_only":
+        c_combined = c_inodes
+        n_total_cherries = n_internal_cherries
+    else:  # both
+        c_combined = np.concatenate([c_tips, c_inodes])
+        n_total_cherries = n_tip_cherries + n_internal_cherries
+
+    logging.info(
+        f'Strategy: {cherry_strategy}. Picked {n_total_cherries} cherries total: {n_tip_cherries} tip, {n_internal_cherries} internal.')
+
+    if len(c_combined) < 2:
         return 1, n_total_cherries
 
-    # Process tip cherries if any
-    c_tips = np.array([], dtype=bool)
-    if n_tip_cherries >= 2:
-        random_diffs_tips, real_diffs_tips = get_real_vs_reshuffled_diffs(tip_cherries)
-        c_tips = random_diffs_tips > real_diffs_tips
-
-    # Process internal cherries if any
-    c_inodes = np.array([], dtype=bool)
-    if n_internal_cherries >= 2:
-        random_diffs_internal, real_diffs_internal = get_real_vs_reshuffled_diffs(internal_cherries)
-        c_inodes = random_diffs_internal > real_diffs_internal
-
-    # Concatenate comparison arrays
-    c_combined = np.concatenate([c_tips, c_inodes])
-
-    # Apply binomial test to combined array
+    # Apply binomial test
     pval = scipy.stats.binomtest(c_combined.sum(), n=len(c_combined), p=0.5, alternative='less').pvalue
 
     return pval, n_total_cherries
@@ -230,31 +241,30 @@ def main():
     import argparse
 
     parser = \
-        argparse.ArgumentParser(description="""BDEI-test.
+        argparse.ArgumentParser(description="""BDEI-test with Cherry Strategy Options.
 
 Checks if the input forest was generated under a -BDEI model.
 The test detects cherries in the forest and sorts them by the times of their roots. 
-For each cherry the test calculates the difference between its tip times, 
-hence obtaining an array of real cherry tip differences. 
-It then generates a collection of random cherry tip differences of the same size: 
-Processing the cherries in couples from the two cherries with the oldest roots 
-to the two (three if the total number of cherries is odd) cherries with the most recent roots,
-we pick one tip per cherry and swap them. We then calculate the tip differences in these swapped cherries.
-An array of reshuffled cherry tip differences (of the same size as the real one) is thus obtained. 
-Finally, the test reports the sign test between the reshuffled and the real values.
 
-Extended version processes tip cherries and internal cherries separately to avoid mixing
-different biological interpretations (sampling vs transmission times).
+Extended version allows testing different cherry strategies:
+- tips_only: Use only traditional tip cherries
+- internal_only: Use only internal node cherries  
+- both: Use both tip and internal cherries (processed separately)
+
+This allows comparison of performance between different approaches.
 
 The test therefore reports a probability of partner notification being present in the tree.""")
     parser.add_argument('--log', required=True, type=str, help="output log file")
     parser.add_argument('--nwk', required=True, type=str, help="input forest file in newick or nexus format")
+    parser.add_argument('--strategy', type=str, default='both',
+                        choices=['tips_only', 'internal_only', 'both'],
+                        help="Cherry strategy: tips_only, internal_only, or both (default: both)")
     params = parser.parse_args()
 
     forest = read_forest(params.nwk)
-    pval, n_cherries = bdei_test(forest)
+    pval, n_cherries = bdei_test(forest, cherry_strategy=params.strategy)
 
-    logging.info(f"BDEI test {pval} on {n_cherries} cherries.")
+    logging.info(f"BDEI test (strategy: {params.strategy}) p-value: {pval:.6f} on {n_cherries} cherries.")
 
     with open(params.log, 'w+') as f:
         f.write('BDEI-test p-value\tnumber of cherries\n')
