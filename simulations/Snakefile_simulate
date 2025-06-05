@@ -12,7 +12,7 @@ num = int(config.get("num", 100))
 REPETITIONS = list(range(num))
 os.makedirs('logs', exist_ok=True)
 
-m, M = int(config.get('min', 2000)), int(config.get('max', 5000))
+m, M = int(config.get('min', 20)), int(config.get('max', 100))
 MODELS = ['BDCT', 'BDEICT']
 
 rule all:

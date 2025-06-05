@@ -39,7 +39,7 @@ rule bdei_test:
     singularity: "docker://evolbioinfo/bdct:v0.1.25"
     shell:
         """
-        python3 /home/alejandra/NEWSNAKE/bdct/bdei_distinguisher.py --nwk {input.nwk} --log {output.log} 
+        python3 /home/alejandra/NEWSNAKE/bdct/bdei_distinguisher.py --nwk {input.nwk} --log {output.log} --strategy internal_only
         """
 
 rule combine_bdei:

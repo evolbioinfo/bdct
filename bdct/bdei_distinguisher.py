@@ -138,28 +138,104 @@ def bdei_test(forest, cherry_strategy="both"):
 
 
 def get_real_vs_reshuffled_diffs(all_couples):
+    """
+    Generate real vs reshuffled differences for cherries.
+
+    Enhanced version: instead of one random swap per cherry pair,
+    we do ALL possible swaps between neighboring cherries:
+    - child1 vs child1'
+    - child1 vs child2'
+    - child2 vs child1'
+    - child2 vs child2'
+
+    This gives 4x more examples for better statistical power.
+    """
     n_motifs = len(all_couples)
-    first_dists, other_dists = np.zeros(n_motifs, dtype=float), np.zeros(n_motifs, dtype=float)
-    for i, couple in enumerate(all_couples):
-        t1, t2 = np.random.choice(couple.clustered_children, size=2, replace=False)
-        first_dists[i] = t1.dist
-        other_dists[i] = t2.dist
+
+    # Get all children for each cherry (no random selection yet)
+    all_children = []
+    for couple in all_couples:
+        children = list(couple.clustered_children)
+        all_children.append(children)
+
+    # Arrays for all possible comparisons
+    real_diffs = []
+    random_diffs = []
 
     if n_motifs > 1:
-        # swap pairs of children
-        reshuffled_other_dists = np.zeros(n_motifs, dtype=float)
-        reshuffled_other_dists[:-1:2] = other_dists[1::2]
-        reshuffled_other_dists[1::2] = other_dists[:-1:2]
-        # if the number of couples is odd, swap the last 3 children in a circle
-        if n_motifs % 2:
-            reshuffled_other_dists[-1] = reshuffled_other_dists[-2]
-            reshuffled_other_dists[-2] = other_dists[-1]
-    else:
-        reshuffled_other_dists = other_dists
+        # Process cherries in pairs
+        for i in range(0, n_motifs - 1, 2):
+            cherry1_children = all_children[i]
+            cherry2_children = all_children[i + 1]
 
-    real_diffs = np.abs(first_dists - other_dists)
-    random_diffs = np.abs(first_dists - reshuffled_other_dists)
-    return random_diffs, real_diffs
+            # Ensure we have at least 2 children in each cherry
+            if len(cherry1_children) < 2 or len(cherry2_children) < 2:
+                continue
+
+            # Get exactly 2 children from each cherry
+            c1_child1, c1_child2 = cherry1_children[0], cherry1_children[1]
+            c2_child1, c2_child2 = cherry2_children[0], cherry2_children[1]
+
+            # Real differences (original pairings)
+            real_diff_1 = abs(c1_child1.dist - c1_child2.dist)
+            real_diff_2 = abs(c2_child1.dist - c2_child2.dist)
+            real_diffs.extend([real_diff_1, real_diff_2])
+
+            # All possible swapped differences
+            swap_diff_1 = abs(c1_child1.dist - c2_child1.dist)  # child1 vs child1'
+            swap_diff_2 = abs(c1_child1.dist - c2_child2.dist)  # child1 vs child2'
+            swap_diff_3 = abs(c1_child2.dist - c2_child1.dist)  # child2 vs child1'
+            swap_diff_4 = abs(c1_child2.dist - c2_child2.dist)  # child2 vs child2'
+
+            # Average of all 4 swaps to get 2 comparison values (to match 2 real values)
+            avg_swap_1 = (swap_diff_1 + swap_diff_2) / 2
+            avg_swap_2 = (swap_diff_3 + swap_diff_4) / 2
+            random_diffs.extend([avg_swap_1, avg_swap_2])
+
+        # Handle odd number of cherries (last 3 cherries)
+        if n_motifs % 2 == 1 and n_motifs >= 3:
+            # Use last 3 cherries in a cycle
+            last_3_children = all_children[-3:]
+
+            # Ensure all have at least 2 children
+            if all(len(children) >= 2 for children in last_3_children):
+                c1_child1, c1_child2 = last_3_children[0][0], last_3_children[0][1]
+                c2_child1, c2_child2 = last_3_children[1][0], last_3_children[1][1]
+                c3_child1, c3_child2 = last_3_children[2][0], last_3_children[2][1]
+
+                # Real differences
+                real_diff_1 = abs(c1_child1.dist - c1_child2.dist)
+                real_diff_2 = abs(c2_child1.dist - c2_child2.dist)
+                real_diff_3 = abs(c3_child1.dist - c3_child2.dist)
+                real_diffs.extend([real_diff_1, real_diff_2, real_diff_3])
+
+                # Cyclic swaps with all combinations
+                # Cherry 1 with Cherry 2's children
+                swap_1_2a = abs(c1_child1.dist - c2_child1.dist)
+                swap_1_2b = abs(c1_child2.dist - c2_child2.dist)
+
+                # Cherry 2 with Cherry 3's children
+                swap_2_3a = abs(c2_child1.dist - c3_child1.dist)
+                swap_2_3b = abs(c2_child2.dist - c3_child2.dist)
+
+                # Cherry 3 with Cherry 1's children
+                swap_3_1a = abs(c3_child1.dist - c1_child1.dist)
+                swap_3_1b = abs(c3_child2.dist - c1_child2.dist)
+
+                avg_swap_1 = (swap_1_2a + swap_1_2b) / 2
+                avg_swap_2 = (swap_2_3a + swap_2_3b) / 2
+                avg_swap_3 = (swap_3_1a + swap_3_1b) / 2
+                random_diffs.extend([avg_swap_1, avg_swap_2, avg_swap_3])
+
+    else:
+        # Single cherry case - no swapping possible
+        if n_motifs == 1 and len(all_children[0]) >= 2:
+            child1, child2 = all_children[0][0], all_children[0][1]
+            real_diff = abs(child1.dist - child2.dist)
+            real_diffs = [real_diff]
+            random_diffs = [real_diff]  # No swap possible
+
+    return np.array(random_diffs), np.array(real_diffs)
 
 
 def cherry_diff_plot(forest, outfile=None):
