@@ -13,7 +13,7 @@ REPETITIONS = list(range(num))
 os.makedirs('logs', exist_ok=True)
 
 m, M = int(config.get('min', 20)), int(config.get('max', 100))
-MODELS = ['BDCT', 'BDEICT']
+MODELS = ['BDCT', 'BDEICT', 'BDSSCT']
 
 rule all:
     input:
