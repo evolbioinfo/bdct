@@ -37,6 +37,7 @@ class ParentChildrenTriplet(object):
 def pick_triplets(tree, include_polytomies=True):
     """
     Picks triplets in the given tree for superspreading detection.
+    Only considers triplets where both children are internal nodes (not leaves).
 
     :param tree: ete3.Tree, the tree of interest
     :param include_polytomies: bool, whether to include nodes with > 2 children
@@ -46,22 +47,22 @@ def pick_triplets(tree, include_polytomies=True):
         if node.is_leaf():
             continue
 
-        # Get all children (both internal nodes and leaves)
-        children = node.children
+        # Get only internal node children (exclude leaves/tips)
+        internal_children = [child for child in node.children if not child.is_leaf()]
 
-        if len(children) < 2:
+        if len(internal_children) < 2:
             continue
 
-        if not include_polytomies and len(children) != 2:
+        if not include_polytomies and len(internal_children) != 2:
             continue
 
-        # For binary nodes, create triplet with parent and 2 children
-        if len(children) == 2:
-            yield ParentChildrenTriplet(node, children[0], children[1])
-        # For polytomies, create triplet with parent and 3+ children
-        elif len(children) >= 3 and include_polytomies:
-            # Take first 3 children for simplicity, or create multiple triplets
-            yield ParentChildrenTriplet(node, children[0], children[1], children[2])
+        # For binary internal nodes, create triplet with parent and 2 internal children
+        if len(internal_children) == 2:
+            yield ParentChildrenTriplet(node, internal_children[0], internal_children[1])
+        # For polytomies, create triplet with parent and 3+ internal children
+        elif len(internal_children) >= 3 and include_polytomies:
+            # Take first 3 internal children
+            yield ParentChildrenTriplet(node, internal_children[0], internal_children[1], internal_children[2])
 
 
 def ss_test(forest):
