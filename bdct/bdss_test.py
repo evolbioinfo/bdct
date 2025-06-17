@@ -68,16 +68,12 @@ def pick_triplets(tree, include_polytomies=True):
 def ss_test(forest):
     """
     Tests if the input forest was generated under a superspreading model.
-
-    The test detects triplets in the forest and sorts them by the times of their parents.
-    For each triplet, it calculates the length differences between sibling branches.
-    It then generates reshuffled triplets by swapping children between neighboring triplets
-    and compares the original vs reshuffled length differences using a sign test.
-
-    The test reports a probability of superspreading being present in the tree.
+    Implements the test as described in the theoretical design: compares
+    parent-child branch differences before and after reshuffling parents
+    between temporally close triplets.
 
     :param forest: list of trees
-    :return: pval, n_triplets
+    :return: p-value, number of triplets
     """
     annotate_forest_with_time(forest)
 
@@ -85,69 +81,81 @@ def ss_test(forest):
     for tree in forest:
         all_triplets.extend(pick_triplets(tree, include_polytomies=True))
 
-    # Sort triplets by parent node time
     all_triplets = sorted(all_triplets, key=lambda t: getattr(t.parent, TIME))
-
     n_triplets = len(all_triplets)
     logging.info(f'Picked {n_triplets} triplets.')
 
     if n_triplets < 2:
-        return 1, n_triplets
+        return 1.0, n_triplets
 
-    random_diffs, real_diffs = get_real_vs_reshuffled_triplet_diffs(all_triplets)
+    real_diffs, reshuffled_diffs = get_real_vs_reshuffled_triplet_diffs(all_triplets)
 
-    # Sign test: if superspreading is present, real differences should be larger
-    # (superspreaders create more heterogeneous branch lengths)
-    pval = scipy.stats.binomtest((real_diffs > random_diffs).sum(),
-                                 n=n_triplets, p=0.5, alternative='less').pvalue
+    flat_real = np.array([v for pair in real_diffs for v in pair])
+    flat_resh = np.array([v for pair in reshuffled_diffs for v in pair])
+
+    # Sign test: are real_diffs systematically smaller than reshuffled_diffs?
+    count = np.sum(flat_real < flat_resh)
+    total = len(flat_real)
+
+    pval = scipy.stats.binomtest(count, n=total, p=0.5, alternative='less').pvalue
 
     return pval, n_triplets
 
 
-def get_real_vs_reshuffled_triplet_diffs(all_triplets):
+def get_real_vs_reshuffled_triplet_diffs(triplets):
     """
-    Calculate real vs reshuffled branch length differences for triplets.
+    Computes parent-child differences for each triplet, and for reshuffled ones.
 
-    :param all_triplets: list of ParentChildrenTriplet objects
-    :return: random_diffs, real_diffs (numpy arrays)
+    Reshuffling swaps the parent nodes between adjacent triplets (sorted by time).
+    The test uses differences between each parent and both children.
+
+    :param triplets: list of ParentChildrenTriplet
+    :return: (real_diffs, reshuffled_diffs) as lists of (d1, d2)
     """
-    n_triplets = len(all_triplets)
+    real_diffs = []
+    reshuffled_diffs = []
 
     # Calculate real differences
-    real_diffs = np.zeros(n_triplets, dtype=float)
-    child1_lengths = np.zeros(n_triplets, dtype=float)
-    child2_lengths = np.zeros(n_triplets, dtype=float)
+    for t in triplets:
+        d1 = abs(t.parent.dist - t.children[0].dist)
+        d2 = abs(t.parent.dist - t.children[1].dist)
+        real_diffs.append((d1, d2))
 
-    for i, triplet in enumerate(all_triplets):
-        # Get branch lengths (dist attribute represents branch length)
-        c1_len = triplet.children[0].dist
-        c2_len = triplet.children[1].dist
+    # Reshuffle parents between adjacent triplets
+    n = len(triplets)
+    reshuffled_triplets = []
 
-        child1_lengths[i] = c1_len
-        child2_lengths[i] = c2_len
-
-        # Calculate absolute difference between sibling branch lengths
-        real_diffs[i] = abs(c1_len - c2_len)
-
-    # Generate reshuffled differences by swapping children between neighboring triplets
-    if n_triplets > 1:
-        reshuffled_child2_lengths = np.zeros(n_triplets, dtype=float)
-
-        # Swap pairs of second children between neighboring triplets
-        reshuffled_child2_lengths[:-1:2] = child2_lengths[1::2]  # even indices get odd values
-        reshuffled_child2_lengths[1::2] = child2_lengths[:-1:2]  # odd indices get even values
-
-        # Handle odd number of triplets by cycling last 3
-        if n_triplets % 2:
-            reshuffled_child2_lengths[-1] = reshuffled_child2_lengths[-2]
-            reshuffled_child2_lengths[-2] = child2_lengths[-1]
+    if n % 2 == 0:
+        # Even case: pairwise swap
+        for i in range(0, n, 2):
+            t1, t2 = triplets[i], triplets[i + 1]
+            reshuffled_triplets.append((t2.parent, t1.children))
+            reshuffled_triplets.append((t1.parent, t2.children))
     else:
-        reshuffled_child2_lengths = child2_lengths.copy()
+        # Odd case: pairwise swap for n-3, then cycle last 3
+        for i in range(0, n - 3, 2):
+            t1, t2 = triplets[i], triplets[i + 1]
+            reshuffled_triplets.append((t2.parent, t1.children))
+            reshuffled_triplets.append((t1.parent, t2.children))
 
-    # Calculate reshuffled differences
-    random_diffs = np.abs(child1_lengths - reshuffled_child2_lengths)
+        # Last 3 triplets: cycle parents
+        tA, tB, tC = triplets[-3], triplets[-2], triplets[-1]
+        pA, pB, pC = tA.parent, tB.parent, tC.parent
+        cA, cB, cC = tA.children, tB.children, tC.children
+        reshuffled_triplets.append((pC, cA))
+        reshuffled_triplets.append((pA, cB))
+        reshuffled_triplets.append((pB, cC))
 
-    return random_diffs, real_diffs
+    # Compute reshuffled differences
+    for parent, children in reshuffled_triplets:
+        d1 = abs(parent.dist - children[0].dist)
+        d2 = abs(parent.dist - children[1].dist)
+        reshuffled_diffs.append((d1, d2))
+
+    assert len(real_diffs) == len(reshuffled_diffs), \
+        f"Real and reshuffled lengths do not match: {len(real_diffs)} vs {len(reshuffled_diffs)}"
+
+    return real_diffs, reshuffled_diffs
 
 
 def triplet_diff_plot(forest, outfile=None):
