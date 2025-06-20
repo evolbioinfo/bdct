@@ -6,19 +6,18 @@ import os
 
 localrules: all
 
-
-folder = config.get("folder", '')
-num = int(config.get("num", 100))
+folder = config.get("folder",'')
+num = int(config.get("num",100))
 REPETITIONS = list(range(num))
-os.makedirs('logs', exist_ok=True)
+os.makedirs('logs',exist_ok=True)
 
-m, M = int(config.get('min', 20)), int(config.get('max', 100))
+m, M = int(config.get('min',3000)), int(config.get('max',5000))
 MODELS = ['BDCT', 'BDEICT', 'BDSSCT']
 
 rule all:
     input:
-        expand(os.path.join(folder, '{model}{n}', 'tree.{i}.nwk'), i=REPETITIONS, \
-            n=[0], k=range(0, 100), model=MODELS),
+        expand(os.path.join(folder,'{model}{n}','tree.{i}.nwk'),i=REPETITIONS, \
+            n=[0],k=range(0,100),model=MODELS),
 
 
 rule simulate_bdct_tree:
@@ -26,8 +25,8 @@ rule simulate_bdct_tree:
     Simulate a BDCT tree.
     '''
     output:
-        log=os.path.join(folder,'BDCT{n}', 'tree.{i}.log'),
-        nwk=os.path.join(folder,'BDCT{n}', 'tree.{i}.nwk'),
+        log=os.path.join(folder,'BDCT{n}','tree.{i}.log'),
+        nwk=os.path.join(folder,'BDCT{n}','tree.{i}.nwk'),
     params:
         mem=2000,
         name='tre{n}.{i}',
@@ -55,37 +54,36 @@ rule simulate_bdct_tree:
             --max_x 100  \
             --min_de_by_di_de 0.05  \
             --max_de_by_di_de 0.95  
-        
+
             la=`tail -n 1 {output.log}.params | awk -F',' '{{ print $1 }}'`
             psi=`tail -n 1 {output.log}.params | awk -F',' '{{ print $2 }}'`
             p=`tail -n 1 {output.log}.params | awk -F',' '{{ print $3 }}'`
             phi=`tail -n 1 {output.log}.params | awk -F',' '{{ print $4 }}'`
             upsilon=`tail -n 1 {output.log}.params | awk -F',' '{{ print $5 }}'`
-            
+
             SECONDS=0
             while (( SECONDS < 900)); 
             do    
                 timeout 4m generate_bd --min_tips {m} --max_tips {M} --la $la --psi $psi --p $p \
                 --phi $phi  --upsilon $upsilon --max_notified_contacts {wildcards.n} \
                 --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
-                
+
                 if [[ -f {output.nwk} ]]; then
                     break
                 fi    
             done
-            
+
             rm -rf {output.log}.params
-            
+
             if [[ -f {output.nwk} ]]; then
                 # remove the root branch
                 sed -i 's/:[0-9\\.]\\+;/;/g' {output.nwk}
                 break
             fi
-            
+
             echo 'The parameter set took too long, restarting!'
         done
         """
-
 
 
 rule simulate_bdeict_tree:
@@ -183,14 +181,14 @@ rule simulate_bdssct_tree:
             --max_ups 0.75  \
             --min_phi_by_psi 10  \
             --max_phi_by_psi 500  \
-            --min_f 0.01  \
+            --min_f 0.25  \
             --max_f 0.5  \
-            --min_x 2  \
+            --min_x 25  \
             --max_x 100  \
             --min_de_by_di_de 0.05  \
             --max_de_by_di_de 0.95  
 
-            
+
             lass=`tail -n 1 {output.log}.params | awk -F',' '{{ print $9 }}'`
             lann=`tail -n 1 {output.log}.params | awk -F',' '{{ print $10 }}'`
             lasn=`tail -n 1 {output.log}.params | awk -F',' '{{ print $11 }}'`
@@ -208,6 +206,112 @@ rule simulate_bdssct_tree:
                 --psi $psi --p $p \
                 --phi $phi  --upsilon $upsilon --max_notified_contacts {wildcards.n} \
                 --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
+
+                if [[ -f {output.nwk} ]]; then
+                    break
+                fi    
+            done
+
+            rm -rf {output.log}.params
+
+            if [[ -f {output.nwk} ]]; then
+                # remove the root branch
+                sed -i 's/:[0-9\\.]\\+;/;/g' {output.nwk}
+                break
+            fi
+
+            echo 'The parameter set took too long, restarting!'
+        done
+        """
+
+rule simulate_bdskyline_tree:
+    '''
+    Simulate a BDSKYline tree with between 2 and 6 different BD intervals.
+    '''
+    output:
+        log=os.path.join(folder,'BDSKYLINE{n}','tree.{i}.log'),
+        nwk=os.path.join(folder,'BDSKYLINE{n}','tree.{i}.nwk')
+    params:
+        mem=2000,
+        name='tre{n}.{i}',
+        qos='fast',
+        # Pass m and M to the shell script as regular shell variables
+        min_tips=m,
+        max_tips=M
+    threads: 1
+    singularity: "docker://evolbioinfo/treesimulator:v0.2.3"
+    shell:
+        """        
+        while [ ! -f {output.nwk} ]
+        do             
+            # Generate parameters for a BDSKYline model using Python
+            # Use .format() to avoid Snakemake misinterpreting f-string curly braces.
+            python3 -c "
+        import random
+        import numpy as np
+        
+        min_intervals = 2
+        max_intervals = 6
+        
+        num_intervals = random.randint(min_intervals, max_intervals)
+        
+        t_points = sorted(random.sample(range(5, 100), num_intervals - 1))
+        t_str = ' '.join(map(str, t_points))
+        
+        las = []
+        mus = []
+        psis = []
+        
+        for _ in range(num_intervals):
+            la = random.uniform(0.1, 1.5)
+            mu = random.uniform(0.01, 0.5)
+            psi = random.uniform(0.01, 0.75)
+            las.append(la)
+            mus.append(mu)
+            psis.append(psi)
+        
+        las_str = ' '.join(map(str, las))
+        mus_str = ' '.join(map(str, mus))
+        psis_str = ' '.join(map(str, psis))
+        
+        # CRUCIAL FIX HERE: Use string.format() instead of f-string
+        with open('{output.log}.params', 'w') as f:
+            f.write('{{}},{{}},{{}},{{}},{{}}\\n'.format(num_intervals, t_str, las_str, mus_str, psis_str))
+        "
+            # Read parameters from the temporary file and assign to shell variables
+            IFS=',' read -r num_intervals_val t_points_str_val las_str_val mus_str_val psis_str_val < {output.log}.params
+
+            # Construct the generate_mtbd_tree.py command dynamically
+            # Using {params.min_tips} and {params.max_tips} for clarity
+            CMD="timeout 4m python3 generate_mtbd_tree.py --min_tips {params.min_tips} --max_tips {params.max_tips} --states I "
+
+            # Add time points if more than one interval (num_intervals_val will be at least 2 here)
+            if [ "$num_intervals_val" -gt 1 ]; then
+                CMD+="--t $t_points_str_val "
+            fi
+
+            # For BDSKYline, we have only one state 'I'.
+            # The transition_matrices will always be 0.0 for a single state.
+            # transmission_matrices are the 'las' for each interval.
+            # removal_vectors are the 'mus' for each interval.
+            # sampling_vectors are the 'psis' for each interval.
+
+            # Build flattened parameter strings for generate_mtbd_tree.py
+            TRANSITION_MATRICES=""
+            for i in $(seq 1 $num_intervals_val); do # Loop using num_intervals_val
+                TRANSITION_MATRICES+="0.0 "
+            done
+
+            CMD+="--transition_matrices $TRANSITION_MATRICES "
+            CMD+="--transmission_matrices \\"$las_str_val\\" " # Quoted to handle spaces correctly
+            CMD+="--removal_vectors \\"$mus_str_val\\" " # Quoted
+            CMD+="--sampling_vectors \\"$psis_str_val\\" " # Quoted
+            CMD+="--nwk {output.nwk} --log {output.log}"
+
+            SECONDS=0
+            while (( SECONDS < 900)); 
+            do    
+                eval "$CMD" || echo 'The tree took too long, restarting!' # Quote CMD for safety
 
                 if [[ -f {output.nwk} ]]; then
                     break
