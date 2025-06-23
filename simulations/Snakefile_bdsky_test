@@ -1,0 +1,80 @@
+import os
+
+# To run locally:
+# snakemake --snakefile Snakefile_bdsky_test --keep-going --cores 7 --config folder=results_bdsky num=100
+# To run on maestro
+# snakemake --snakefile Snakefile_bdsky_test --config folder=results_bdsky num=100 --keep-going --cores 1 --cluster "sbatch ..."
+
+localrules: all
+
+folder = config.get("folder", '')
+num = int(config.get("num", 100))
+REPETITIONS = list(range(num))
+
+# Input paths
+BDSKY_PATH = "/home/alejandra/NEWSNAKE/simulations_bdsky/trees"
+BDCT_PATH = "/home/alejandra/NEWSNAKE/simulations/BDCT0"
+
+os.makedirs('logs', exist_ok=True)
+
+rule all:
+    input:
+        os.path.join(folder, 'bdsky_tests.tab')
+
+rule bdsky_test_bdsky_trees:
+    '''
+    BDSKY-test on BD-Skyline trees.
+    '''
+    input:
+        nwk=os.path.join(BDSKY_PATH, 'final_tree.{i}.nwk')
+    output:
+        log=os.path.join(BDSKY_PATH, 'final_tree.{i}.bdsky_test'),
+    params:
+        mem=2000,
+        name='bdsky_{i}',
+        qos='fast'
+    threads: 1
+    singularity: "docker://evolbioinfo/bdct:v0.1.25"
+    shell:
+        """
+        python3 /home/alejandra/NEWSNAKE/bdct/bdsky_test.py --nwk {input.nwk} --log {output.log}
+        """
+
+rule bdsky_test_bdct_trees:
+    '''
+    BDSKY-test on BDCT trees (control).
+    '''
+    input:
+        nwk=os.path.join(BDCT_PATH, 'tree.{i}.nwk')
+    output:
+        log=os.path.join(BDCT_PATH, 'tree.{i}.bdsky_test'),
+    params:
+        mem=2000,
+        name='bdct_{i}',
+        qos='fast'
+    threads: 1
+    singularity: "docker://evolbioinfo/bdct:v0.1.25"
+    shell:
+        """
+        python3 /home/alejandra/NEWSNAKE/bdct/bdsky_test.py --nwk {input.nwk} --log {output.log}
+        """
+
+rule combine_bdsky:
+    '''
+    Combine BDSKY test results.
+    '''
+    input:
+        bdsky_logs = expand(os.path.join(BDSKY_PATH, 'final_tree.{i}.bdsky_test'), i=REPETITIONS),
+        bdct_logs = expand(os.path.join(BDCT_PATH, 'tree.{i}.bdsky_test'), i=REPETITIONS)
+    output:
+        tab = os.path.join(folder, 'bdsky_tests.tab'),
+    params:
+        mem = 2000,
+        name = 'combine_bdsky',
+        qos = 'fast',
+    threads: 1
+    singularity: "docker://evolbioinfo/pastml:v1.9.43"
+    shell:
+        """
+        python3 /home/alejandra/NEWSNAKE/simulations/py/summary_table_bdsky.py --logs {input.bdsky_logs} {input.bdct_logs} --tab {output.tab}
+        """
