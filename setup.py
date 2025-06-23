@@ -19,11 +19,11 @@ setup(
         'Topic :: Software Development :: Libraries :: Python Modules',
     ],
     version='0.1.26',
-    description='Maximum likelihood estimation of BD and BD-CT(1) parameters from phylogenetic trees.',
+    description='Maximum likelihood estimation of BD, BD-CT(1) and BDSKY parameters from phylogenetic trees.',
     author='Anna Zhukova',
     author_email='anna.zhukova@pasteur.fr',
     url='https://github.com/evolbioinfo/bdct',
-    keywords=['phylogenetics', 'birth-death model', 'partner notification', 'contact tracing', 'BD', 'BD-CT'],
+    keywords=['phylogenetics', 'birth-death model', 'birth-death skyline', 'partner notification', 'contact tracing', 'BD', 'BD-CT', 'BDSKY'],
     install_requires=['six', 'ete3', 'numpy', 'scipy', 'sympy', 'biopython'],
     requires=['six', 'ete3', 'numpy', 'scipy', 'sympy', 'biopython'],
     entry_points={
