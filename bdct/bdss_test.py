@@ -146,7 +146,7 @@ def bdss_test(forest):
         n_triplets,
         n=n_total_pairs,
         p=0.5,
-        alternative='less'
+        alternative='greater'
     ).pvalue
 
     logging.info(f"Pairs (child+parent both shorter): {n_total_pairs}")
