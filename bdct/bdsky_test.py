@@ -24,31 +24,6 @@ def annotate_tree_with_time(tree):
             node.add_features(time=node.up.time + node.dist)
 
 
-def prune_tips_after_time(tree, cutoff_time):
-    """
-    Prune all tips that were sampled after the given cutoff time.
-
-    :param tree: ete3.Tree, the tree to prune
-    :param cutoff_time: float, time after which to prune tips
-    :return: ete3.Tree, pruned tree copy
-    """
-    tree_copy = tree.copy()
-
-    # Find tips to remove
-    tips_to_remove = []
-    for leaf in tree_copy:
-        if getattr(leaf, TIME) > cutoff_time:
-            tips_to_remove.append(leaf)
-
-    # Remove tips
-    for tip in tips_to_remove:
-        # Ensure the tip exists before attempting to delete it
-        if tip in tree_copy.iter_leaves():
-            tip.delete()
-
-    return tree_copy
-
-
 def extract_branches_in_interval(tree, t_start, t_end):
     """
     Extract branch lengths that fall completely within a time interval.
@@ -79,67 +54,64 @@ def extract_branches_in_interval(tree, t_start, t_end):
     return internal_branches, external_branches
 
 
-def test_interval_pair(tree, t1, t2, delta_t, T, min_branches=DEFAULT_MIN_BRANCHES):
+def find_time_for_n_branches(tree, n_branches, branch_type='internal'):
     """
-    Test a single pair of intervals for skyline evidence.
+    Find the time T from root needed to accumulate n complete branches of specified type.
 
     :param tree: ete3.Tree, the tree of interest
-    :param t1: float, start time of first interval
-    :param t2: float, start time of second interval
-    :param delta_t: float, duration of each interval
-    :param T: float, total tree time
-    :param min_branches: int, minimum number of branches required per interval
-    :return: dict with test results or None if insufficient data
+    :param n_branches: int, number of branches to accumulate
+    :param branch_type: str, either 'internal' or 'external'
+    :return: float, time T from root, or None if not enough branches found
     """
-    # Validate input parameters as per the image description
-    # Ensure t1 < t2 < T, t1 + delta_t < t2, and t2 + delta_t < T
-    # Added a small epsilon to comparisons to account for floating point inaccuracies
-    epsilon = 1e-9
-    if not (t1 < t2 - epsilon and t1 + delta_t < t2 - epsilon and t2 + delta_t < T - epsilon):
+    # Collect all branches with their end times
+    branches_with_times = []
+
+    for node in tree.traverse():
+        if node.is_root() or node.dist is None:
+            continue
+
+        branch_end_time = getattr(node, TIME)
+        branch_start_time = branch_end_time - node.dist
+
+        # Check branch type
+        if branch_type == 'internal' and not node.is_leaf():
+            branches_with_times.append((branch_end_time, branch_start_time, node.dist))
+        elif branch_type == 'external' and node.is_leaf():
+            branches_with_times.append((branch_end_time, branch_start_time, node.dist))
+
+    if len(branches_with_times) < n_branches:
         return None
 
-    # Process first interval [t1, t1 + Δt]
-    tree1_pruned = prune_tips_after_time(tree, t1 + delta_t)
-    # Re-annotate time for the pruned tree as branch lengths might change due to pruning
-    annotate_tree_with_time(tree1_pruned)
-    internal1, external1 = extract_branches_in_interval(tree1_pruned, t1, t1 + delta_t)
+    # Sort by end time to process branches chronologically
+    branches_with_times.sort(key=lambda x: x[0])
 
-    # Process second interval [t2, t2 + Δt]
-    tree2_pruned = prune_tips_after_time(tree, t2 + delta_t)
-    # Re-annotate time for the pruned tree
-    annotate_tree_with_time(tree2_pruned)
-    internal2, external2 = extract_branches_in_interval(tree2_pruned, t2, t2 + delta_t)
+    # Find the time when we have n complete branches
+    complete_branches = 0
+    current_time = 0.0
 
-    # Check minimum branch requirements for both internal and external branches
-    if (len(internal1) < min_branches or len(external1) < min_branches or
-            len(internal2) < min_branches or len(external2) < min_branches):
-        return None
+    for branch_end_time, branch_start_time, branch_length in branches_with_times:
+        # Check if this branch would be complete by its end time
+        if branch_start_time >= 0:  # Branch starts at or after root
+            complete_branches += 1
+            if complete_branches >= n_branches:
+                return branch_end_time
 
-    # Kolmogorov-Smirnov tests
-    # Use 2-sample KS test to compare the distributions
-    ks_internal = scipy.stats.ks_2samp(internal1, internal2)
-    ks_external = scipy.stats.ks_2samp(external1, external2)
-
-    return {
-        'intervals': (t1, t2, delta_t),
-        'branch_counts': (len(internal1), len(external1), len(internal2), len(external2)),
-        'ks_internal_stat': ks_internal.statistic,
-        'ks_external_stat': ks_external.statistic,
-        'pval_internal': ks_internal.pvalue,
-        'pval_external': ks_external.pvalue
-    }
+    return None
 
 
-def sky_test(tree, min_branches=DEFAULT_MIN_BRANCHES):
+def sky_test_early_vs_late(tree, n_branches=DEFAULT_MIN_BRANCHES):
     """
-    Tests if the input tree was generated under a BD-Skyline model.
+    Tests if the input tree was generated under a BD-Skyline model by comparing
+    early vs late intervals of the tree.
 
-    This version uses a more systematic search for interval pairs and applies
-    Benjamini-Hochberg (FDR) correction for multiple testing.
+    For internal branches: finds time T needed for n complete internal branches,
+    then compares [0, T] vs [tree_height - T, tree_height] using Mann-Whitney U test.
+
+    For external branches: does the same but for external branches.
 
     :param tree: ete3.Tree, the tree of interest
-    :param min_branches: int, minimum number of branches required per interval
-    :return: tuple of (evidence_found, num_tests, best_result)
+    :param n_branches: int, minimum number of branches to define interval size
+    :return: tuple of (evidence_found, test_results, bonferroni_evidence)
     """
     annotate_tree_with_time(tree)
     tree_height = max(getattr(node, TIME) for node in tree.traverse())
@@ -148,114 +120,138 @@ def sky_test(tree, min_branches=DEFAULT_MIN_BRANCHES):
 
     if tree_height == 0:
         logging.warning("Tree height is zero, cannot perform SKY test.")
-        return False, 0, None
+        return False, None
 
-    all_p_values = []
-    all_test_results = []
+    results = {}
 
-    # Define parameters for systematic interval search
-    # These ratios are relative to the tree_height to make them adaptable to different tree sizes.
-    # We choose ranges that are likely to contain meaningful intervals for skyline detection.
-    # Aumentado el número de puntos para generar más pares de intervalos.
-    t1_ratios = np.linspace(0.0, 0.5, 40)  # Start times for the first interval (e.g., 0% to 50% of tree height)
-    delta_t_ratios = np.linspace(0.1, 0.3, 7)  # Durations for each interval (e.g., 10% to 30% of tree height)
-    t2_gap_ratios = np.linspace(0.05, 0.3, 40)  # Gap between the two intervals (e.g., 5% to 30% of tree height)
+    # Test internal branches
+    logging.info("Testing internal branches...")
+    T_internal = find_time_for_n_branches(tree, n_branches, 'internal')
 
-    # Minimum absolute delta_t to ensure intervals are not infinitesimally small,
-    # which can lead to unstable statistics or empty branch sets.
-    min_delta_t_abs = max(0.001 * tree_height, 0.01)
-
-    for t1_ratio in t1_ratios:
-        t1 = t1_ratio * tree_height
-        for delta_t_ratio in delta_t_ratios:
-            delta_t = max(delta_t_ratio * tree_height, min_delta_t_abs)
-
-            # Ensure the first interval fits within the tree height
-            if t1 + delta_t >= tree_height:
-                continue
-
-            for t2_gap_ratio in t2_gap_ratios:
-                t2_gap = t2_gap_ratio * tree_height
-                t2 = t1 + delta_t + t2_gap  # Calculate start time of second interval
-
-                # Ensure the second interval fits within the tree height
-                if t2 + delta_t >= tree_height:
-                    continue
-
-                result = test_interval_pair(tree, t1, t2, delta_t, tree_height, min_branches)
-                if result:
-                    all_test_results.append(result)
-                    # Collect both internal and external p-values for FDR correction
-                    all_p_values.append(result['pval_internal'])
-                    all_p_values.append(result['pval_external'])
-
-    num_tests_performed = len(all_test_results)  # This is the count of valid interval PAIRS tested
-    num_p_values = len(all_p_values)  # This is the total number of p-values for FDR correction
-
-    logging.info(f'Performed {num_tests_performed} valid interval pair comparisons, yielding {num_p_values} p-values.')
-
-    if num_p_values == 0:
-        return False, 0, None
-
-    # Benjamini-Hochberg (FDR) correction to control false discoveries
-    # Sort all p-values in ascending order
-    sorted_p_values = sorted(all_p_values)
-    alpha = 0.05  # Standard significance level for FDR
-
-    # Find the largest k such that P_(k) <= (k/m) * alpha
-    # Iterate backwards from the largest p-value to find the highest rank 'k' that satisfies the condition.
-    evidence_found = False
-
-    # We will store all p-values that are considered significant after BH correction.
-    # The 'best_result' will then be the one among these significant results with the lowest original p-value.
-    significant_results_candidates = []
-
-    for k in range(num_p_values):
-        bh_threshold = (k + 1) / num_p_values * alpha
-        # Check if the current p-value (from sorted list) is less than or equal to its BH threshold
-        if sorted_p_values[k] <= bh_threshold:
-            # Mark that evidence is found, and then collect all results that meet *this* threshold
-            # as any p-value less than or equal to sorted_p_values[k] will also be significant.
-            # This logic needs to iterate through ALL original test results and check against the final threshold.
-            evidence_found = True
-
-    if evidence_found:
-        final_bh_threshold = sorted_p_values[k]  # The largest p-value that was significant
-
-        for result in all_test_results:
-            if result['pval_internal'] <= final_bh_threshold or result['pval_external'] <= final_bh_threshold:
-                significant_results_candidates.append(result)
-
-        if significant_results_candidates:
-            # Find the best result among the significant candidates based on the minimum of internal/external p-values
-            best_result = min(significant_results_candidates, key=lambda x: min(x['pval_internal'], x['pval_external']))
-        else:
-            # This case should ideally not happen if evidence_found is True, but as a fallback
-            best_result = None
-            evidence_found = False  # Reset if no actual significant results were found
-
+    if T_internal is None:
+        logging.warning(f"Not enough internal branches found (need {n_branches})")
+        results['internal'] = None
+    elif T_internal >= tree_height:
+        logging.warning(
+            f"Time for {n_branches} internal branches ({T_internal:.4f}) exceeds tree height ({tree_height:.4f})")
+        results['internal'] = None
     else:
-        best_result = None
+        # Extract branches from early interval [0, T_internal]
+        early_internal, _ = extract_branches_in_interval(tree, 0, T_internal)
 
-    logging.info(f'Evidence found (FDR controlled at alpha={alpha}): {evidence_found}')
-    if evidence_found and best_result:
-        logging.info(
-            f'Best result details: intervals [{best_result["intervals"][0]:.4f}-{best_result["intervals"][0] + best_result["intervals"][2]:.4f}] vs '
-            f'[{best_result["intervals"][1]:.4f}-{best_result["intervals"][1] + best_result["intervals"][2]:.4f}]')
-        logging.info(
-            f'  Internal KS-statistic={best_result["ks_internal_stat"]:.4f}, External KS-statistic={best_result["ks_external_stat"]:.4f}')
-        logging.info(
-            f'  Internal P-value={best_result["pval_internal"]:.6f}, External P-value={best_result["pval_external"]:.6f}')
+        # Extract branches from late interval [tree_height - T_internal, tree_height]
+        late_start = tree_height - T_internal
+        if late_start < 0:
+            late_start = 0
+        late_internal, _ = extract_branches_in_interval(tree, late_start, tree_height)
 
-    return evidence_found, num_tests_performed, best_result
+        if len(early_internal) >= n_branches and len(late_internal) >= n_branches:
+            # Perform Mann-Whitney U test
+            u_result = scipy.stats.mannwhitneyu(early_internal, late_internal, alternative='two-sided')
+
+            results['internal'] = {
+                'T': T_internal,
+                'early_interval': (0, T_internal),
+                'late_interval': (late_start, tree_height),
+                'early_branches': early_internal,
+                'late_branches': late_internal,
+                'early_count': len(early_internal),
+                'late_count': len(late_internal),
+                'u_statistic': u_result.statistic,
+                'p_value': u_result.pvalue
+            }
+
+            logging.info(f"Internal branches - T={T_internal:.4f}")
+            logging.info(f"  Early interval [0, {T_internal:.4f}]: {len(early_internal)} branches")
+            logging.info(f"  Late interval [{late_start:.4f}, {tree_height:.4f}]: {len(late_internal)} branches")
+            logging.info(f"  Mann-Whitney U statistic: {u_result.statistic:.4f}, p-value: {u_result.pvalue:.6f}")
+        else:
+            logging.warning(
+                f"Insufficient internal branches in intervals (early: {len(early_internal)}, late: {len(late_internal)})")
+            results['internal'] = None
+
+    # Test external branches
+    logging.info("Testing external branches...")
+    T_external = find_time_for_n_branches(tree, n_branches, 'external')
+
+    if T_external is None:
+        logging.warning(f"Not enough external branches found (need {n_branches})")
+        results['external'] = None
+    elif T_external >= tree_height:
+        logging.warning(
+            f"Time for {n_branches} external branches ({T_external:.4f}) exceeds tree height ({tree_height:.4f})")
+        results['external'] = None
+    else:
+        # Extract branches from early interval [0, T_external]
+        _, early_external = extract_branches_in_interval(tree, 0, T_external)
+
+        # Extract branches from late interval [tree_height - T_external, tree_height]
+        late_start = tree_height - T_external
+        if late_start < 0:
+            late_start = 0
+        _, late_external = extract_branches_in_interval(tree, late_start, tree_height)
+
+        if len(early_external) >= n_branches and len(late_external) >= n_branches:
+            # Perform Mann-Whitney U test
+            u_result = scipy.stats.mannwhitneyu(early_external, late_external, alternative='two-sided')
+
+            results['external'] = {
+                'T': T_external,
+                'early_interval': (0, T_external),
+                'late_interval': (late_start, tree_height),
+                'early_branches': early_external,
+                'late_branches': late_external,
+                'early_count': len(early_external),
+                'late_count': len(late_external),
+                'u_statistic': u_result.statistic,
+                'p_value': u_result.pvalue
+            }
+
+            logging.info(f"External branches - T={T_external:.4f}")
+            logging.info(f"  Early interval [0, {T_external:.4f}]: {len(early_external)} branches")
+            logging.info(f"  Late interval [{late_start:.4f}, {tree_height:.4f}]: {len(late_external)} branches")
+            logging.info(f"  Mann-Whitney U statistic: {u_result.statistic:.4f}, p-value: {u_result.pvalue:.6f}")
+        else:
+            logging.warning(
+                f"Insufficient external branches in intervals (early: {len(early_external)}, late: {len(late_external)})")
+            results['external'] = None
+
+    # Determine if evidence of skyline model is found
+    alpha = 0.05
+    evidence_found = False
+    significant_tests = []
+
+    for branch_type in ['internal', 'external']:
+        if results[branch_type] is not None:
+            if results[branch_type]['p_value'] < alpha:
+                evidence_found = True
+                significant_tests.append(branch_type)
+
+    # Apply Bonferroni correction for multiple testing (we do 2 tests)
+    bonferroni_alpha = alpha / 2
+    bonferroni_evidence = False
+    bonferroni_significant = []
+
+    for branch_type in ['internal', 'external']:
+        if results[branch_type] is not None:
+            if results[branch_type]['p_value'] < bonferroni_alpha:
+                bonferroni_evidence = True
+                bonferroni_significant.append(branch_type)
+
+    logging.info(f'Evidence found (α={alpha}): {evidence_found} ({significant_tests})')
+    logging.info(
+        f'Evidence found (Bonferroni α={bonferroni_alpha:.3f}): {bonferroni_evidence} ({bonferroni_significant})')
+
+    return evidence_found, results, bonferroni_evidence
 
 
-def plot_sky_test_results(tree, outfile=None):
+def plot_early_vs_late_results(tree, results, outfile=None):
     """
-    Plot branch length distributions across time for visualization.
+    Plot branch length distributions for early vs late intervals.
     Requires matplotlib and seaborn installed.
 
     :param tree: ete3.Tree, the tree of interest
+    :param results: dict, results from sky_test_early_vs_late
     :param outfile: str, optional output file for plot
     """
     try:
@@ -266,48 +262,47 @@ def plot_sky_test_results(tree, outfile=None):
             "matplotlib and seaborn required for plotting. Please install them using 'pip install matplotlib seaborn'.")
         return
 
-    annotate_tree_with_time(tree)
-    tree_height = max(getattr(node, TIME) for node in tree.traverse())
-
-    if tree_height == 0:
-        logging.warning("Tree height is zero, cannot generate plot.")
+    # Count valid results
+    valid_results = [k for k, v in results.items() if v is not None]
+    if not valid_results:
+        logging.warning("No valid results to plot.")
         return
 
-    # Divide tree into 4 quarters for visualization
-    quarter = tree_height / 4
-    intervals = [(i * quarter, (i + 1) * quarter) for i in range(4)]
+    n_plots = len(valid_results)
+    fig, axes = plt.subplots(2, n_plots, figsize=(6 * n_plots, 8))
 
-    # Adjust figsize to give more space for titles and labels if needed
-    fig, axes = plt.subplots(2, 4, figsize=(18, 9))
-    colors = sns.color_palette("husl", 4)
+    if n_plots == 1:
+        axes = axes.reshape(2, 1)
 
-    for i, (t_start, t_end) in enumerate(intervals):
-        internal, external = extract_branches_in_interval(tree, t_start, t_end)
+    colors = ['skyblue', 'lightcoral']
 
-        # Plot internal branches
-        # Check if axes[0, i] is a valid matplotlib axes object before plotting.
-        if internal and axes[0, i] is not None:
-            axes[0, i].hist(internal, bins=15, alpha=0.7, color=colors[i],
-                            edgecolor='black')  # Added edgecolor for clarity
-        if axes[0, i] is not None:
-            axes[0, i].set_title(f'Internal [{t_start:.2f}, {t_end:.2f}]\n({len(internal)} branches)',
-                                 fontsize=10)  # Reduced fontsize
-            axes[0, i].set_xlabel('Branch Length', fontsize=9)
-            axes[0, i].set_ylabel('Frequency', fontsize=9)
-            axes[0, i].tick_params(axis='both', which='major', labelsize=8)  # Reduced tick label size
+    for i, branch_type in enumerate(valid_results):
+        result = results[branch_type]
 
-        # Plot external branches
-        if external and axes[1, i] is not None:
-            axes[1, i].hist(external, bins=15, alpha=0.7, color=colors[i],
-                            edgecolor='black')  # Added edgecolor for clarity
-        if axes[1, i] is not None:
-            axes[1, i].set_title(f'External [{t_start:.2f}, {t_end:.2f}]\n({len(external)} branches)',
-                                 fontsize=10)  # Reduced fontsize
-            axes[1, i].set_xlabel('Branch Length', fontsize=9)
-            axes[1, i].set_ylabel('Frequency', fontsize=9)
-            axes[1, i].tick_params(axis='both', which='major', labelsize=8)  # Reduced tick label size
+        # Plot early interval
+        axes[0, i].hist(result['early_branches'], bins=15, alpha=0.7,
+                        color=colors[0], edgecolor='black', label='Early')
+        axes[0, i].set_title(f'{branch_type.capitalize()} Branches - Early Interval\n'
+                             f'[{result["early_interval"][0]:.2f}, {result["early_interval"][1]:.2f}]\n'
+                             f'({result["early_count"]} branches)')
+        axes[0, i].set_xlabel('Branch Length')
+        axes[0, i].set_ylabel('Frequency')
 
-    plt.tight_layout()  # Ensures elements don't overlap
+        # Plot late interval
+        axes[1, i].hist(result['late_branches'], bins=15, alpha=0.7,
+                        color=colors[1], edgecolor='black', label='Late')
+        axes[1, i].set_title(f'{branch_type.capitalize()} Branches - Late Interval\n'
+                             f'[{result["late_interval"][0]:.2f}, {result["late_interval"][1]:.2f}]\n'
+                             f'({result["late_count"]} branches)')
+        axes[1, i].set_xlabel('Branch Length')
+        axes[1, i].set_ylabel('Frequency')
+
+        # Add Mann-Whitney U test results as text
+        axes[1, i].text(0.05, 0.95, f'U stat: {result["u_statistic"]:.4f}\np-value: {result["p_value"]:.6f}',
+                        transform=axes[1, i].transAxes, verticalalignment='top',
+                        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+    plt.tight_layout()
 
     if outfile:
         try:
@@ -321,14 +316,16 @@ def plot_sky_test_results(tree, outfile=None):
 
 def main():
     """
-    Entry point for SKY test with command-line arguments.
+    Entry point for modified SKY test with command-line arguments.
     """
     parser = argparse.ArgumentParser(description="""
-SKY test for Birth-Death Skyline models.
+Modified SKY test for Birth-Death Skyline models.
 
 Tests if the input tree was generated under a Birth-Death Skyline model
-by automatically searching for time intervals with different branch length
-distributions. Uses Kolmogorov-Smirnov tests to compare distributions.
+by comparing early vs late intervals. For each branch type (internal/external),
+finds the time T needed to accumulate N complete branches, then compares
+distributions between [0, T] and [tree_height - T, tree_height] using 
+Mann-Whitney U tests.
 """)
 
     parser.add_argument('--nwk', required=True, type=str,
@@ -336,7 +333,7 @@ distributions. Uses Kolmogorov-Smirnov tests to compare distributions.
     parser.add_argument('--log', type=str, help="Output log file")
     parser.add_argument('--plot', type=str, help="Output plot file")
     parser.add_argument('--min-branches', type=int, default=DEFAULT_MIN_BRANCHES,
-                        help=f"Minimum branches per interval (default: {DEFAULT_MIN_BRANCHES})")
+                        help=f"Minimum branches to define interval (default: {DEFAULT_MIN_BRANCHES})")
     parser.add_argument('--verbose', action='store_true', help="Verbose logging")
 
     args = parser.parse_args()
@@ -348,53 +345,62 @@ distributions. Uses Kolmogorov-Smirnov tests to compare distributions.
     try:
         # Read tree
         tree = Tree(args.nwk, format=1)
-        total_tips = len(tree.get_leaves())  # Get total number of tips
+        total_tips = len(tree.get_leaves())
 
         # Log total tips
-        print(f"Total tips in tree: {total_tips}")  # Added this line for easier parsing
+        print(f"Total tips in tree: {total_tips}")
 
         # Run test
-        evidence_found, num_tests, best_result = sky_test(tree, args.min_branches)
+        evidence_found, results, bonferroni_evidence = sky_test_early_vs_late(tree, args.min_branches)
 
         # Results
-        if evidence_found:
-            print("SKY test: Evidence of BD-Skyline model detected")
-            if best_result:
-                print(
-                    f"Best evidence from interval pair: "
-                    f"[{best_result['intervals'][0]:.4f}-{best_result['intervals'][0] + best_result['intervals'][2]:.4f}] "
-                    f"vs [{best_result['intervals'][1]:.4f}-{best_result['intervals'][1] + best_result['intervals'][2]:.4f}]")
-                print(
-                    f"  Internal KS-statistic={best_result['ks_internal_stat']:.4f}, External KS-statistic={best_result['ks_external_stat']:.4f}")
-                print(
-                    f"  Internal P-value={best_result['pval_internal']:.6f}, External P-value={best_result['pval_external']:.6f}")
+        if bonferroni_evidence:
+            print("SKY test: Evidence of BD-Skyline model detected (Bonferroni corrected)")
+        elif evidence_found:
+            print("SKY test: Evidence of BD-Skyline model detected (uncorrected)")
         else:
             print("SKY test: No evidence of BD-Skyline model (consistent with simple BD)")
 
-        print(f"Number of valid interval pairs tested: {num_tests}")
+        # Print detailed results
+        for branch_type in ['internal', 'external']:
+            if results[branch_type] is not None:
+                result = results[branch_type]
+                print(f"\n{branch_type.capitalize()} branches:")
+                print(f"  T = {result['T']:.4f}")
+                print(
+                    f"  Early interval [{result['early_interval'][0]:.4f}, {result['early_interval'][1]:.4f}]: {result['early_count']} branches")
+                print(
+                    f"  Late interval [{result['late_interval'][0]:.4f}, {result['late_interval'][1]:.4f}]: {result['late_count']} branches")
+                print(f"  Mann-Whitney U statistic: {result['u_statistic']:.4f}")
+                print(f"  p-value: {result['p_value']:.6f}")
 
         # Generate plot if requested
         if args.plot:
-            plot_sky_test_results(tree, args.plot)
+            plot_early_vs_late_results(tree, results, args.plot)
 
         # Write log if requested
         if args.log:
             with open(args.log, 'w') as f:
-                f.write('SKY test results\n')
-                f.write('================\n')
-                f.write(f'Total tips in tree: {total_tips}\n')  # Also write to log file
-                f.write(f'Evidence of skyline model: {"Yes" if evidence_found else "No"}\n')
-                f.write(f'Number of interval pairs tested: {num_tests}\n')
-                if best_result:
-                    f.write(
-                        f'Best evidence interval pair: [{best_result["intervals"][0]:.4f}-{best_result["intervals"][0] + best_result["intervals"][2]:.4f}] vs [{best_result["intervals"][1]:.4f}-{best_result["intervals"][1] + best_result["intervals"][2]:.4f}]\n')
-                    f.write(f'Best internal KS statistic: {best_result["ks_internal_stat"]:.6f}\n')
-                    f.write(f'Best external KS statistic: {best_result["ks_external_stat"]:.6f}\n')
-                    f.write(f'Best internal p-value: {best_result["pval_internal"]:.6f}\n')
-                    f.write(f'Best external p-value: {best_result["pval_external"]:.6f}\n')
+                f.write('Modified SKY test results - Early vs Late comparison\n')
+                f.write('=====================================================\n')
+                f.write(f'Total tips in tree: {total_tips}\n')
+                f.write(f'Evidence of skyline model (uncorrected): {"Yes" if evidence_found else "No"}\n')
+                f.write(f'Evidence of skyline model (Bonferroni): {"Yes" if bonferroni_evidence else "No"}\n')
+
+                for branch_type in ['internal', 'external']:
+                    if results[branch_type] is not None:
+                        result = results[branch_type]
+                        f.write(f'\n{branch_type.capitalize()} branches:\n')
+                        f.write(f'  T = {result["T"]:.6f}\n')
+                        f.write(
+                            f'  Early interval: [{result["early_interval"][0]:.6f}, {result["early_interval"][1]:.6f}] ({result["early_count"]} branches)\n')
+                        f.write(
+                            f'  Late interval: [{result["late_interval"][0]:.6f}, {result["late_interval"][1]:.6f}] ({result["late_count"]} branches)\n')
+                        f.write(f'  Mann-Whitney U statistic: {result["u_statistic"]:.6f}\n')
+                        f.write(f'  p-value: {result["p_value"]:.6f}\n')
 
     except Exception as e:
-        logging.error(f"Error running SKY test: {e}")
+        logging.error(f"Error running modified SKY test: {e}")
         return 1
 
     return 0
