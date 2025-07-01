@@ -37,7 +37,7 @@ rule bdsky_test_bdsky_trees:
     singularity: "docker://evolbioinfo/bdct:v0.1.25"
     shell:
         """
-        python3 /home/alejandra/NEWSNAKE/bdct/bdsky_test.py --nwk {input.nwk} --log {output.log}
+        python3 /home/alejandra/NEWSNAKE/bdct/bdsky_test.py --nwk {input.nwk} --log {output.log} 
         """
 
 rule bdsky_test_bdct_trees:
@@ -56,9 +56,8 @@ rule bdsky_test_bdct_trees:
     singularity: "docker://evolbioinfo/bdct:v0.1.25"
     shell:
         """
-        python3 /home/alejandra/NEWSNAKE/bdct/bdsky_test.py --nwk {input.nwk} --log {output.log}
+        python3 /home/alejandra/NEWSNAKE/bdct/bdsky_test.py --nwk {input.nwk} --log {output.log} 
         """
-
 rule combine_bdsky:
     '''
     Combine BDSKY test results.
