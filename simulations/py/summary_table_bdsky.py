@@ -19,38 +19,52 @@ if __name__ == "__main__":
 
     # Define the columns specifically for the new bdsky_test.py output
     df = pd.DataFrame(
-        columns=['model', 'tree/forest', 'id', 'evidence_type', 'BDSKY_evidence', 'evidence_binary',
+        columns=['model', 'tree/forest', 'id', 'BDSKY_evidence', 'evidence_binary',
                  'internal_u_stat', 'external_u_stat', 'internal_pval', 'external_pval',
-                 'T_value', 'num_tips', 'result', 'test_type'])
+                 'T_value', 'num_tips', 'result', 'test_type', 'filepath'])
 
     if not params.logs:
         logging.error("No log files provided. Please use --logs to specify input log files.")
     else:
-        for log_path in params.logs:  # Renamed 'log' to 'log_path' to avoid confusion with log content
+        for log_path in params.logs:
             logging.debug(f"Processing log file: {log_path}")
             try:
                 with open(log_path, 'r') as f:
                     content = f.read()
 
                 # Extract tree ID from filename - assuming filename contains a numeric ID
-                # e.g., tree_001.log -> id=1
-                match_id = re.findall(r'(\d+)', os.path.basename(log_path))
+                # e.g., tree_001.log or final_tree.0.bdsky_test -> id=0
+                match_id = re.findall(r'(\d+)(?=\.bdsky_test|\.log|$)', os.path.basename(log_path))
                 i = int(match_id[-1]) if match_id else 0  # Use 0 or some default if no ID found
 
-                # Determine model type from log content
+                # --- CORRECTED MODEL DETERMINATION LOGIC ---
                 model = 'UNKNOWN'
-                # Check for "New BD-Skyline test results" or "NEW SKY test"
-                if 'New BD-Skyline test results' in content or 'NEW SKY test: Evidence of BD-Skyline model detected' in content:
+                path_lower = log_path.lower()
+                dirname_lower = os.path.dirname(log_path).lower()  # Get just the directory part
+                basename_lower = os.path.basename(log_path).lower()  # Get just the filename part
+
+                # Rule 1: If it's explicitly from a 'BDCT0' directory, it's a simple BD tree.
+                # This must come first because the filename itself might contain 'bdsky_test'.
+                if 'bdct0' in dirname_lower:
+                    model = 'BD'
+                # Rule 2: If it's explicitly from a 'bdsky' or 'simulations_bdsky' directory, it's a BDSKY tree.
+                elif 'simulations_bdsky' in dirname_lower or 'bdsky' in dirname_lower:
                     model = 'BDSKY'
+                # Rule 3: Fallback for generic 'bd' in directory, but only if not already caught as BDSKY.
+                # This covers other potential simple BD simulation directory structures.
+                elif 'bd' in dirname_lower and 'bdsky' not in dirname_lower:
+                    model = 'BD'
+                # Rule 4: If still UNKNOWN, and 'bdsky_test' is in the filename, assume BDSKY
+                # This is a last resort if directory names aren't definitive.
+                elif 'bdsky_test' in basename_lower and model == 'UNKNOWN':
+                    model = 'BDSKY'
+                # --- END CORRECTED MODEL DETERMINATION LOGIC ---
 
                 data_type = 'tree'  # This script processes individual tree logs
-
-                # This script is specifically for the 'new_strategy' or 'balanced' test
-                test_type = 'new_strategy'  # Based on log content: "new strategy" or "new strategy comparison"
+                test_type = 'new_strategy'
 
                 # Initialize variables for the current log file
-                evidence_binary_uncorrected = 0
-                evidence_binary_bonferroni = 0
+                evidence_binary = 0
                 internal_u_stat = float('nan')
                 external_u_stat = float('nan')
                 internal_pval = float('nan')
@@ -64,13 +78,15 @@ if __name__ == "__main__":
                     num_tips = int(tips_match.group(1))
 
                 # Parse T value
-                t_match = re.search(r'Time \(T\) based on \d+ tips:\s*([\d.]+)', content)
+                t_match = re.search(r'Time \(T\) based on \d+ tips \(N/\d+\):\s*([\d.]+)', content)
+                if not t_match:  # Fallback to original regex if new format not found
+                    t_match = re.search(r'Time \(T\) based on \d+ tips:\s*([\d.]+)', content)
                 if t_match:
                     T_value = float(t_match.group(1))
 
-                # Parse internal branches results - CORRECTED REGEX to handle 'comparison'
+                # Parse internal branches results
                 internal_section_match = re.search(
-                    r'Internal branches \(new strategy(?: comparison)?\):\s*'  # Added (?: comparison)?
+                    r'Internal branches \(new strategy(?: comparison)?\):\s*'
                     r'.*?T used = ([\d.]+)\s*'
                     r'.*?Early subtree interval: .*?\n'
                     r'.*?Late subtree interval: .*?\n'
@@ -78,16 +94,16 @@ if __name__ == "__main__":
                     r'.*?p-value: ([\d.e-]+)', content, re.DOTALL
                 )
                 if internal_section_match:
-                    # Note: T used is group(1), U statistic is group(2), p-value is group(3)
-                    # We are only storing U stat and p-value here. T_value is parsed separately.
                     internal_u_stat = float(internal_section_match.group(2))
                     internal_pval = float(internal_section_match.group(3))
                 else:
                     logging.debug(f"No internal branch section found in {log_path}")
+                    if "Internal branches: Not enough data for comparison." in content:
+                        internal_pval = 'N/A (Insufficient Data)'
 
-                # Parse external branches results - CORRECTED REGEX to handle 'comparison'
+                # Parse external branches results
                 external_section_match = re.search(
-                    r'External branches \(new strategy(?: comparison)?\):\s*'  # Added (?: comparison)?
+                    r'External branches \(new strategy(?: comparison)?\):\s*'
                     r'.*?T used = ([\d.]+)\s*'
                     r'.*?Early subtree interval: .*?\n'
                     r'.*?Late subtree interval: .*?\n'
@@ -99,35 +115,29 @@ if __name__ == "__main__":
                     external_pval = float(external_section_match.group(3))
                 else:
                     logging.debug(f"No external branch section found in {log_path}")
+                    if "External branches: Not enough data for comparison." in content:
+                        external_pval = 'N/A (Insufficient Data)'
 
-                # Determine overall evidence based on the summary lines
-                evidence_uncorrected_line = re.search(r'Evidence of skyline model \(uncorrected\):\s*(Yes|No)', content)
-                evidence_bonferroni_line = re.search(r'Evidence of skyline model \(Bonferroni\):\s*(Yes|No)', content)
+                # Determine overall evidence based on the new single summary line
+                evidence_detected_line = re.search(r'NEW SKY test: Evidence of BD-Skyline model detected', content)
+                no_evidence_detected_line = re.search(
+                    r'NEW SKY test: No evidence of BD-Skyline model \(consistent with simple BD\)', content)
 
-                if evidence_uncorrected_line:
-                    evidence_binary_uncorrected = 1 if evidence_uncorrected_line.group(1) == 'Yes' else 0
-
-                if evidence_bonferroni_line:
-                    evidence_binary_bonferroni = 1 if evidence_bonferroni_line.group(1) == 'Yes' else 0
-
-                # Fallback if specific summary lines are not found (e.g., if parsing was partial)
-                alpha = 0.05
-                bonferroni_alpha = alpha / 2  # Hardcoded as in bdsky_test.py
-
-                if pd.isna(internal_pval) and pd.isna(external_pval):
-                    logging.warning(f"No p-values found for {log_path}. Cannot determine significance.")
+                if evidence_detected_line:
+                    evidence_binary = 1
+                elif no_evidence_detected_line:
+                    evidence_binary = 0
                 else:
-                    if (not pd.isna(internal_pval) and internal_pval < alpha) or \
-                            (not pd.isna(external_pval) and external_pval < alpha):
-                        evidence_binary_uncorrected = 1
+                    # Fallback: if explicit summary line not found, infer from p-values directly
+                    alpha = 0.05
+                    if (isinstance(internal_pval, float) and not pd.isna(internal_pval) and internal_pval < alpha) or \
+                            (isinstance(external_pval, float) and not pd.isna(external_pval) and external_pval < alpha):
+                        evidence_binary = 1
+                    else:
+                        evidence_binary = 0  # Default to no evidence if not explicitly found/inferred significant
 
-                    if (not pd.isna(internal_pval) and internal_pval < bonferroni_alpha) or \
-                            (not pd.isna(external_pval) and external_pval < bonferroni_alpha):
-                        evidence_binary_bonferroni = 1
-
-                # Set evidence text based on binary values
-                evidence_text_uncorrected = "Yes" if evidence_binary_uncorrected else "No"
-                evidence_text_bonferroni = "Yes" if evidence_binary_bonferroni else "No"
+                # Set evidence text based on binary value
+                evidence_text = "Yes" if evidence_binary == 1 else "No"
 
                 # Debug logging
                 if params.verbose:
@@ -136,34 +146,26 @@ if __name__ == "__main__":
                     logging.debug(f"ID: {i}")
                     logging.debug(f"Num Tips: {num_tips}")
                     logging.debug(f"T Value: {T_value:.4f}")
-                    logging.debug(f"Internal U stat: {internal_u_stat:.4f}, Pval: {internal_pval:.6f}")
-                    logging.debug(f"External U stat: {external_u_stat:.4f}, Pval: {external_pval:.6f}")
-                    logging.debug(f"Evidence uncorrected: {evidence_text_uncorrected} ({evidence_binary_uncorrected})")
-                    logging.debug(f"Evidence bonferroni: {evidence_text_bonferroni} ({evidence_binary_bonferroni})")
+                    logging.debug(f"Internal U stat: {internal_u_stat:.4f}, Pval: {internal_pval}")
+                    logging.debug(f"External U stat: {external_u_stat:.4f}, Pval: {external_pval}")
+                    logging.debug(f"Evidence: {evidence_text} ({evidence_binary})")
 
-                # Create entries for both uncorrected and Bonferroni-corrected results
-                for evidence_type, evidence_text, evidence_binary in [
-                    ('uncorrected', evidence_text_uncorrected, evidence_binary_uncorrected),
-                    ('bonferroni', evidence_text_bonferroni, evidence_binary_bonferroni)
-                ]:
-                    # Determine result classification
-                    if model == 'BDSKY':
-                        result = 'TP' if evidence_binary == 1 else 'FN'
-                    # Add logic for other models if needed
-                    # elif model in ['BDCT', 'BD']:
-                    #     result = 'TN' if evidence_binary == 0 else 'FP'
-                    else:  # For 'UNKNOWN' or other models where we don't define TP/TN/FP/FN this way
-                        result = 'UNDEF'
+                # Determine result classification (TP, FN, FP, TN)
+                result = 'UNDEF'  # Default
+                if model == 'BDSKY':
+                    result = 'TP' if evidence_binary == 1 else 'FN'
+                elif model == 'BD':
+                    result = 'TN' if evidence_binary == 0 else 'FP'
 
-                    # Add data to DataFrame
-                    df.loc[f'{model}.{data_type}.{i}.{evidence_type}',
-                    ['model', 'tree/forest', 'id', 'evidence_type', 'BDSKY_evidence', 'evidence_binary',
-                     'internal_u_stat', 'external_u_stat', 'internal_pval', 'external_pval',
-                     'T_value', 'num_tips', 'result', 'test_type']] = [
-                        model, data_type, i, evidence_type, evidence_text, evidence_binary,
-                        internal_u_stat, external_u_stat, internal_pval, external_pval,
-                        T_value, num_tips, result, test_type
-                    ]
+                # Add data to DataFrame
+                df.loc[f'{os.path.basename(log_path)}',  # Using filename as index
+                ['model', 'tree/forest', 'id', 'BDSKY_evidence', 'evidence_binary',
+                 'internal_u_stat', 'external_u_stat', 'internal_pval', 'external_pval',
+                 'T_value', 'num_tips', 'result', 'test_type', 'filepath']] = [
+                    model, data_type, i, evidence_text, evidence_binary,
+                    internal_u_stat, external_u_stat, internal_pval, external_pval,
+                    T_value, num_tips, result, test_type, log_path
+                ]
 
             except Exception as e:
                 logging.error(f"Error processing {log_path}: {e}")
@@ -173,109 +175,127 @@ if __name__ == "__main__":
                     logging.error(traceback.format_exc())
                 continue
 
+        # --- Debugging: Print count of models found ---
+        print("\n--- Models identified from log file paths ---")
+        if not df.empty:
+            print(df['model'].value_counts().to_string())
+        else:
+            print("No models identified from any log files.")
+        print("-------------------------------------------\n")
+
     # --- Global statistics ---
     # Ensure numeric columns are actually numeric before calculating statistics
     numeric_columns = ['evidence_binary', 'internal_u_stat', 'external_u_stat',
                        'internal_pval', 'external_pval', 'T_value', 'num_tips']
     for col in numeric_columns:
-        df[col] = pd.to_numeric(df[col], errors='coerce')  # Do not fillna(0) here, keep NaN for correct aggregation
+        # Only convert if the column might contain floats, otherwise leave 'N/A (Insufficient Data)' as string
+        if col in ['internal_pval', 'external_pval']:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        else:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    for evidence_type in ['uncorrected', 'bonferroni']:
-        df_subset = df[df['evidence_type'] == evidence_type]
+    print('\n' + '=' * 80)
+    print("Summary Statistics")
+    print('=' * 80)
 
-        TP = len(df_subset[df_subset['result'] == 'TP'])
-        TN = len(df_subset[df_subset['result'] == 'TN'])
-        FP = len(df_subset[df_subset['result'] == 'FP'])
-        FN = len(df_subset[df_subset['result'] == 'FN'])
+    # Now only one set of global statistics
+    TP = len(df[df['result'] == 'TP'])
+    TN = len(df[df['result'] == 'TN'])
+    FP = len(df[df['result'] == 'FP'])
+    FN = len(df[df['result'] == 'FN'])
+    UNDEF = len(df[df['result'] == 'UNDEF'])  # Count undefined results
 
-        print(f'Global ({evidence_type}):')
-        sensitivity = TP / (TP + FN) if (TP + FN) > 0 else float('nan')
-        specificity = TN / (TN + FP) if (TN + FP) > 0 else float('nan')
-        accuracy = (TP + TN) / (TP + TN + FP + FN) if (TP + TN + FP + FN) > 0 else float('nan')
-        precision = TP / (TP + FP) if (TP + FP) > 0 else float('nan')
-        print(f'\tTP={TP}, TN={TN}, FP={FP}, FN={FN}')
-        print(f'\tSensitivity={sensitivity:.4f}, Specificity={specificity:.4f}')
-        print(f'\tAccuracy={accuracy:.4f}, Precision={precision:.4f}')
-        print('==============\n')
+    print(f'Global Results:')
+    sensitivity = TP / (TP + FN) if (TP + FN) > 0 else float('nan')
+    specificity = TN / (TN + FP) if (TN + FP) > 0 else float('nan')
+    accuracy = (TP + TN) / (TP + TN + FP + FN) if (TP + TN + FP + FN) > 0 else float('nan')
+    precision = TP / (TP + FP) if (TP + FP) > 0 else float('nan')
+    print(f'\tTP={TP}, TN={TN}, FP={FP}, FN={FN}, UNDEF={UNDEF}')
+    print(f'\tSensitivity={sensitivity:.4f}, Specificity={specificity:.4f}')
+    print(f'\tAccuracy={accuracy:.4f}, Precision={precision:.4f}')
+    print('==============\n')
 
     # --- Statistics by model ---
-    for evidence_type in ['uncorrected', 'bonferroni']:
-        print(f'\n=== {evidence_type.upper()} RESULTS ===')
-        df_evidence = df[df['evidence_type'] == evidence_type]
+    print(f'\n=== RESULTS BY MODEL ===')
 
-        for test_type in df_evidence['test_type'].unique():
-            df_test_type = df_evidence[df_evidence['test_type'] == test_type]
-            print(f'\n--- {test_type.upper()} TEST TYPE ---')
+    for test_type in df['test_type'].unique():
+        df_test_type = df[df['test_type'] == test_type]
+        print(f'\n--- {test_type.upper()} TEST TYPE ---')
 
-            for model in df_test_type['model'].unique():
-                for data_type in df_test_type['tree/forest'].unique():
-                    ddf = df_test_type[(df_test_type['model'] == model) & (df_test_type['tree/forest'] == data_type)]
-                    if len(ddf) == 0:
-                        continue
+        for model in df_test_type['model'].unique():
+            for data_type in df_test_type['tree/forest'].unique():
+                ddf = df_test_type[(df_test_type['model'] == model) & (df_test_type['tree/forest'] == data_type)]
+                if len(ddf) == 0:
+                    continue
 
-                    # Basic statistics
-                    mean_evidence = ddf['evidence_binary'].mean()
-                    mean_internal_u = ddf['internal_u_stat'].mean()
-                    mean_external_u = ddf['external_u_stat'].mean()
-                    mean_internal_pval = ddf['internal_pval'].mean()
-                    mean_external_pval = ddf['external_pval'].mean()
-                    mean_T = ddf['T_value'].mean()
+                # Basic statistics
+                mean_evidence = ddf['evidence_binary'].mean()
+                mean_internal_u = ddf['internal_u_stat'].mean()
+                mean_external_u = ddf['external_u_stat'].mean()
+                mean_internal_pval = ddf['internal_pval'].mean()
+                mean_external_pval = ddf['external_pval'].mean()
+                mean_T = ddf['T_value'].mean()
 
-                    num_detected = len(ddf[ddf['evidence_binary'] == 1])
-                    percentage_detected = 100 * num_detected / len(ddf) if len(ddf) > 0 else 0.0
+                num_detected = len(ddf[ddf['evidence_binary'] == 1])
+                percentage_detected = 100 * num_detected / len(ddf) if len(ddf) > 0 else 0.0
 
-                    TP_model = len(ddf[ddf['result'] == 'TP'])
-                    TN_model = len(ddf[ddf['result'] == 'TN'])
-                    FP_model = len(ddf[ddf['result'] == 'FP'])
-                    FN_model = len(ddf[ddf['result'] == 'FN'])
+                TP_model = len(ddf[ddf['result'] == 'TP'])
+                TN_model = len(ddf[ddf['result'] == 'TN'])
+                FP_model = len(ddf[ddf['result'] == 'FP'])
+                FN_model = len(ddf[ddf['result'] == 'FN'])
 
-                    tips_min = ddf['num_tips'].min() if not ddf['num_tips'].isnull().all() else float('nan')
-                    tips_mean = ddf['num_tips'].mean() if not ddf['num_tips'].isnull().all() else float('nan')
-                    tips_max = ddf['num_tips'].max() if not ddf['num_tips'].isnull().all() else float('nan')
+                tips_min = ddf['num_tips'].min() if not ddf['num_tips'].isnull().all() else float('nan')
+                tips_mean = ddf['num_tips'].mean() if not ddf['num_tips'].isnull().all() else float('nan')
+                tips_max = ddf['num_tips'].max() if not ddf['num_tips'].isnull().all() else float('nan')
 
-                    print(f'{model} on {data_type}s ({evidence_type}, {test_type}):')
+                print(f'{model} on {data_type}s ({test_type}):')
 
-                    sensitivity_model = TP_model / (TP_model + FN_model) if (TP_model + FN_model) > 0 else float('nan')
-                    specificity_model = TN_model / (TN_model + FP_model) if (TN_model + FP_model) > 0 else float('nan')
-                    accuracy_model = (TP_model + TN_model) / (TP_model + TN_model + FP_model + FN_model) if (
-                                                                                                                    TP_model + TN_model + FP_model + FN_model) > 0 else float(
-                        'nan')
-                    precision_model = TP_model / (TP_model + FP_model) if (TP_model + FP_model) > 0 else float('nan')
+                sensitivity_model = TP_model / (TP_model + FN_model) if (TP_model + FN_model) > 0 else float('nan')
+                specificity_model = TN_model / (TN_model + FP_model) if (TN_model + FP_model) > 0 else float('nan')
+                accuracy_model = (TP_model + TN_model) / (TP_model + TN_model + FP_model + FN_model) if (
+                                                                                                                TP_model + TN_model + FP_model + FN_model) > 0 else float(
+                    'nan')
+                precision_model = TP_model / (TP_model + FP_model) if (TP_model + FP_model) > 0 else float('nan')
 
-                    print(f'\tTP={TP_model}, TN={TN_model}, FP={FP_model}, FN={FN_model}')
-                    print(f'\tSensitivity={sensitivity_model:.4f}, Specificity={specificity_model:.4f}')
-                    print(f'\tAccuracy={accuracy_model:.4f}, Precision={precision_model:.4f}')
+                print(f'\tTP={TP_model}, TN={TN_model}, FP={FP_model}, FN={FN_model}')
+                print(f'\tSensitivity={sensitivity_model:.4f}, Specificity={specificity_model:.4f}')
+                print(f'\tAccuracy={accuracy_model:.4f}, Precision={precision_model:.4f}')
 
-                    print('--------Test metrics:')
-                    print(f'\tSkyline detected\t{percentage_detected:.1f}%')
-                    print(f'\tavg evidence rate\t{mean_evidence:.3f}')
-                    print(f'\tavg internal U stat\t{mean_internal_u:.4f}')
-                    print(f'\tavg external U stat\t{mean_external_u:.4f}')
-                    print(f'\tavg internal p-val\t{mean_internal_pval:.6f}')
-                    print(f'\tavg external p-val\t{mean_external_pval:.6f}')
-                    print(f'\tavg T\t{mean_T:.4f}')
-                    print(f'\tavg num tips\t{tips_mean:.0f}\t[{tips_min:.0f}-{tips_max:.0f}]' if not pd.isna(
-                        tips_mean) else '\tavg num tips\tNaN')
+                print('--------Test metrics:')
+                print(f'\tSkyline detected\t{percentage_detected:.1f}%')
+                print(f'\tavg evidence rate\t{mean_evidence:.3f}')
+                print(f'\tavg internal U stat\t{mean_internal_u:.4f}')
+                print(f'\tavg external U stat\t{mean_external_u:.4f}')
+                print(f'\tavg internal p-val\t{mean_internal_pval:.6f}')
+                print(f'\tavg external p-val\t{mean_external_pval:.6f}')
+                print(f'\tavg T\t{mean_T:.4f}')
+                print(f'\tavg num tips\t{tips_mean:.0f}\t[{tips_min:.0f}-{tips_max:.0f}]' if not pd.isna(
+                    tips_mean) else '\tavg num tips\tNaN')
 
-                    print('--------FN/FP details:')
-                    ddff = ddf[(ddf['result'] == 'FN') | (ddf['result'] == 'FP')]
+                print('--------FN/FP details:')
+                ddff = ddf[(ddf['result'] == 'FN') | (ddf['result'] == 'FP')]
 
-                    if len(ddff) > 0:
-                        # Convert to string and replace NaN with 'nan' for consistent output
-                        internal_u_list = '\t'.join(
-                            f'{float(_):.4f}' if not pd.isna(_) else 'nan' for _ in ddff['internal_u_stat'].to_list())
-                        external_u_list = '\t'.join(
-                            f'{float(_):.4f}' if not pd.isna(_) else 'nan' for _ in ddff['external_u_stat'].to_list())
-                        evidence_list = '\t'.join(f'{_}' for _ in ddff['BDSKY_evidence'].astype(str).to_list())
-                        print(f'\tinternal U stats\t{internal_u_list}')
-                        print(f'\texternal U stats\t{external_u_list}')
-                        print(f'\tevidence\t{evidence_list}')
-                    else:
-                        print('\tNo FN/FP entries for this model/data type.')
+                if len(ddff) > 0:
+                    # Convert to string and replace NaN with 'nan' for consistent output
+                    internal_u_list = '\t'.join(
+                        f'{float(_):.4f}' if pd.notna(_) else 'nan' for _ in ddff['internal_u_stat'].to_list())
+                    external_u_list = '\t'.join(
+                        f'{float(_):.4f}' if pd.notna(_) else 'nan' for _ in ddff['external_u_stat'].to_list())
+                    evidence_list = '\t'.join(f'{_}' for _ in ddff['BDSKY_evidence'].astype(str).to_list())
 
-                    print('==============\n')
+                    print(f'\tinternal U stats\t{internal_u_list}')
+                    print(f'\texternal U stats\t{external_u_list}')
+                    print(f'\tevidence\t{evidence_list}')
 
-    df.sort_values(by=['model', 'tree/forest', 'id', 'evidence_type'], inplace=True)
+                    # Print filenames for FN/FP cases
+                    file_list = '\t'.join(f'{os.path.basename(_)}' for _ in ddff['filepath'].to_list())
+                    print(f'\tfilenames\t{file_list}')
+                else:
+                    print('\tNo FN/FP entries for this model/data type.')
+
+                print('==============\n')
+
+    df.sort_values(by=['model', 'tree/forest', 'id'], inplace=True)
 
     # Save the dataframe to the specified tab file
     if params.tab:

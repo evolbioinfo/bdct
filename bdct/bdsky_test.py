@@ -231,7 +231,7 @@ def sky_test_new_strategy(tree, min_mann_whitney_samples=DEFAULT_MANN_WHITNEY_MI
     :param tree: ete3.Tree, the tree of interest
     :param min_mann_whitney_samples: int, minimum samples required for Mann-Whitney U test
     :param n_tips_fraction_denominator: int, denominator for fraction of tips to use (e.g., 4 for N/4, 2 for N/2)
-    :return: tuple of (evidence_found, test_results, bonferroni_evidence, split_times)
+    :return: tuple of (evidence_found, test_results, split_times)
     """
     annotate_tree_with_time(tree)
     tree_height = max(getattr(node, TIME) for node in tree.traverse())
@@ -241,17 +241,18 @@ def sky_test_new_strategy(tree, min_mann_whitney_samples=DEFAULT_MANN_WHITNEY_MI
 
     if tree_height == 0:
         logging.warning("Tree height is zero, cannot perform SKY test.")
-        return False, None, False, {}
+        return False, None, {}
 
     results = {}
     split_times = {}
 
     # Step 1: Find T based on N/X tips (where X is n_tips_fraction_denominator)
     n_tips_for_T = total_tips // n_tips_fraction_denominator
+    split_times['n_tips_for_T_used'] = n_tips_for_T # Store which N fraction was used
     if n_tips_for_T == 0:
         logging.warning(f"Total tips ({total_tips}) is too low, N/{n_tips_fraction_denominator} tips for T is 0. Cannot determine T.")
         results['internal'] = results['external'] = None
-        return False, results, False, split_times
+        return False, results, split_times
 
     T = find_time_for_n_tips(tree, n_tips_for_T)
     split_times['T_from_tips'] = T
@@ -260,7 +261,7 @@ def sky_test_new_strategy(tree, min_mann_whitney_samples=DEFAULT_MANN_WHITNEY_MI
         logging.warning(
             f"Could not determine a valid T based on {n_tips_for_T} tips, or T is too large/small. T={T:.4f}")
         results['internal'] = results['external'] = None
-        return False, results, False, split_times  # Early exit if T is invalid
+        return False, results, split_times  # Early exit if T is invalid
 
     logging.info(f"Determined T = {T:.4f} based on {n_tips_for_T} tips (N/{n_tips_fraction_denominator}).")
 
@@ -290,7 +291,7 @@ def sky_test_new_strategy(tree, min_mann_whitney_samples=DEFAULT_MANN_WHITNEY_MI
         logging.warning(
             f"Tree became empty after attempting to prune with remove_certain_leaves at time {T:.4f}. Cannot perform early interval analysis.")
         results['internal'] = results['external'] = None
-        return False, results, False, split_times  # Early exit if pruned tree is empty
+        return False, results, split_times  # Early exit if pruned tree is empty
 
     # Step 4: Study the largest subtree in the early interval [0, T] of the *pruned* tree
     # For the tree where tips > T are removed, the "first interval" [0, T] is essentially the entire (modified) tree.
@@ -358,7 +359,7 @@ def sky_test_new_strategy(tree, min_mann_whitney_samples=DEFAULT_MANN_WHITNEY_MI
             f"Insufficient external branches for comparison (early: {len(early_external_branches)}, late: {len(late_external_branches)}) (Needed: {min_mann_whitney_samples})")
         results['external'] = None
 
-    # Determine if evidence of skyline model is found
+    # Determine if evidence of skyline model is found (uncorrected)
     evidence_found = False
     significant_tests = []
 
@@ -368,28 +369,16 @@ def sky_test_new_strategy(tree, min_mann_whitney_samples=DEFAULT_MANN_WHITNEY_MI
                 evidence_found = True
                 significant_tests.append(branch_type)
 
-    # Apply Bonferroni correction for multiple testing (we do 2 tests)
-    bonferroni_alpha = alpha / 2
-    bonferroni_evidence = False
-    bonferroni_significant = []
-
-    for branch_type in ['internal', 'external']:
-        if results[branch_type] is not None:
-            if results[branch_type]['p_value'] < bonferroni_alpha:
-                bonferroni_evidence = True
-                bonferroni_significant.append(branch_type)
-
     logging.info(f'Evidence found (α={alpha}): {evidence_found} ({significant_tests})')
-    logging.info(
-        f'Evidence found (Bonferroni α={bonferroni_alpha:.3f}): {bonferroni_evidence} ({bonferroni_significant})')
+    # Removed Bonferroni specific logging
 
     any_test_run = results['internal'] is not None or results['external'] is not None
     if not any_test_run:
         logging.error(
             "No tests could be performed due to insufficient branch data for the chosen strategy. Cannot conclude SKY test.")
-        return False, None, False, split_times  # Early exit if no tests run
+        return False, None, split_times  # Early exit if no tests run
 
-    return evidence_found, results, bonferroni_evidence, split_times
+    return evidence_found, results, split_times
 
 
 def plot_early_vs_late_results(tree, results, outfile=None):
@@ -516,16 +505,16 @@ The interval size T is determined by the time at which N/X tips are accumulated,
 
         # --- Primary run with N/4 tips ---
         logging.info("Attempting BD-Skyline test with N/4 tips for T...")
-        evidence_found, results, bonferroni_evidence, split_times = sky_test_new_strategy(
-            tree, args.min_mw_samples, n_tips_fraction_denominator=4
+        evidence_found, results, split_times = sky_test_new_strategy( # Removed bonferroni_evidence here
+            tree.copy("deepcopy"), args.min_mw_samples, n_tips_fraction_denominator=4 # Deep copy for first run too
         )
 
         # --- Rerun with N/2 tips if N/4 test failed (results is None) ---
         if results is None:
             logging.warning("N/4 tip analysis failed. Retrying BD-Skyline test with N/2 tips for T...")
-            # Create a fresh copy of the tree for the rerun to avoid any side effects from the previous run
+            # Create a fresh copy of the original tree for the rerun to avoid any side effects from the previous run
             tree_for_rerun = Tree(args.nwk, format=1)
-            evidence_found, results, bonferroni_evidence, split_times = sky_test_new_strategy(
+            evidence_found, results, split_times = sky_test_new_strategy( # Removed bonferroni_evidence here
                 tree_for_rerun, args.min_mw_samples, n_tips_fraction_denominator=2
             )
             if results is not None:
@@ -548,24 +537,15 @@ The interval size T is determined by the time at which N/X tips are accumulated,
 
         if 'T_from_tips' in split_times and split_times['T_from_tips'] is not None:
             split_time_T = split_times['T_from_tips']
-            # Determine which N fraction was actually used for display purposes
-            used_fraction_denominator = 4 if results is None else (2 if results is not None and split_times.get('n_tips_for_T_used') == total_tips // 2 else 4)
-            # A more robust way to get the exact N/X used in the successful run:
-            # You might want to modify sky_test_new_strategy to return the `n_tips_for_T` it actually used.
-            # For now, let's assume if results is not None, it's from the N/2 run if the N/4 failed.
-            if results is not None and split_times.get('n_tips_for_T_used') is not None: # Check if the split_times dict contains info on what was used.
-                n_tips_for_T_display = split_times['n_tips_for_T_used']
-                # Reconstruct denominator for display. This is a heuristic.
-                if n_tips_for_T_display == total_tips // 4:
-                    used_fraction_denominator = 4
-                elif n_tips_for_T_display == total_tips // 2:
-                    used_fraction_denominator = 2
-                else:
-                    used_fraction_denominator = "Unknown" # Fallback
+            n_tips_for_T_display = split_times['n_tips_for_T_used']
+            # Reconstruct denominator for display.
+            if n_tips_for_T_display == total_tips // 4:
+                used_fraction_denominator = 4
+            elif n_tips_for_T_display == total_tips // 2:
+                used_fraction_denominator = 2
+            else:
+                used_fraction_denominator = "Unknown" # Fallback
 
-            else: # If results is None, no T was found successfully.
-                 n_tips_for_T_display = "N/A"
-                 used_fraction_denominator = "N/A"
 
             percentage = (split_time_T / tree_height) * 100 if tree_height > 0 else 0
             print(
@@ -577,10 +557,8 @@ The interval size T is determined by the time at which N/X tips are accumulated,
         print("=" * 50)
 
         # Results summary
-        if bonferroni_evidence:
-            print("\nNEW SKY test: Evidence of BD-Skyline model detected (Bonferroni corrected)")
-        elif evidence_found:
-            print("\nNEW SKY test: Evidence of BD-Skyline model detected (uncorrected)")
+        if evidence_found: # Only checking uncorrected evidence now
+            print("\nNEW SKY test: Evidence of BD-Skyline model detected")
         else:
             print("\nNEW SKY test: No evidence of BD-Skyline model (consistent with simple BD)")
 
@@ -623,18 +601,13 @@ The interval size T is determined by the time at which N/X tips are accumulated,
                 f.write('-----------------\n')
                 if 'T_from_tips' in split_times and split_times['T_from_tips'] is not None:
                     split_time_T = split_times['T_from_tips']
-                    # Determine which N fraction was actually used for display purposes in log
-                    if results is not None and split_times.get('n_tips_for_T_used') is not None:
-                        n_tips_for_T_display = split_times['n_tips_for_T_used']
-                        if n_tips_for_T_display == total_tips // 4:
-                            used_fraction_denominator = 4
-                        elif n_tips_for_T_display == total_tips // 2:
-                            used_fraction_denominator = 2
-                        else:
-                            used_fraction_denominator = "Unknown"
+                    n_tips_for_T_display = split_times['n_tips_for_T_used']
+                    if n_tips_for_T_display == total_tips // 4:
+                        used_fraction_denominator = 4
+                    elif n_tips_for_T_display == total_tips // 2:
+                        used_fraction_denominator = 2
                     else:
-                         n_tips_for_T_display = "N/A"
-                         used_fraction_denominator = "N/A"
+                        used_fraction_denominator = "Unknown"
 
                     percentage = (split_time_T / tree_height) * 100 if tree_height > 0 else 0
                     f.write(
@@ -643,8 +616,8 @@ The interval size T is determined by the time at which N/X tips are accumulated,
                     f.write("Time (T) based on N/X tips: Not available (insufficient tips or calculation error)\n")
 
 
-                f.write(f'\nEvidence of skyline model (uncorrected): {"Yes" if evidence_found else "No"}\n')
-                f.write(f'Evidence of skyline model (Bonferroni): {"Yes" if bonferroni_evidence else "No"}\n')
+                f.write(f'\nEvidence of skyline model: {"Yes" if evidence_found else "No"}\n') # Only uncorrected now
+                # Removed Bonferroni logging line
 
                 if results is not None: # Log detailed results only if available
                     for branch_type in ['internal', 'external']:
