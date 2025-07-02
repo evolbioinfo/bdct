@@ -161,6 +161,12 @@ def get_real_vs_reshuffled_diffs_less(all_couples):
     n_motifs = len(all_couples)
     first_dists, other_dists = np.zeros(n_motifs, dtype=float), np.zeros(n_motifs, dtype=float)
 
+    root_times = np.array([getattr(c.root, TIME) for c in all_couples])
+    diff_right = np.concatenate((np.abs(root_times[:-1] - root_times[1:]), [np.inf]))
+    diff_left = np.concatenate(([np.inf], np.abs(root_times[1:] - root_times[:-1])))
+
+    left_is_closer = diff_left < diff_right
+
     for i, couple in enumerate(all_couples):
         t1, t2 = np.random.choice(couple.clustered_children, size=2, replace=False)
         first_dists[i] = t1.dist
@@ -173,12 +179,20 @@ def get_real_vs_reshuffled_diffs_less(all_couples):
     other_vs_other_diffs = np.abs(other_dists[:-1] - other_dists[1:])
     other_vs_first_diffs = np.abs(other_dists[:-1] - first_dists[1:])
 
-    n_less = (first_vs_first_diffs < real_diffs[:-1]).sum() + (first_vs_first_diffs < real_diffs[1:]).sum() \
-     + (first_vs_other_diffs < real_diffs[:-1]).sum() + (first_vs_other_diffs < real_diffs[1:]).sum() \
-     + (other_vs_other_diffs < real_diffs[:-1]).sum() + (other_vs_other_diffs < real_diffs[1:]).sum() \
-     + (other_vs_first_diffs < real_diffs[:-1]).sum() + (other_vs_first_diffs < real_diffs[1:]).sum()
+    n_less = np.where(left_is_closer, np.concatenate(([False], first_vs_first_diffs < real_diffs[1:])), np.concatenate((first_vs_first_diffs < real_diffs[:-1], [False]))).sum() \
+             + np.where(left_is_closer, np.concatenate(([False], first_vs_other_diffs < real_diffs[1:])), np.concatenate((first_vs_other_diffs < real_diffs[:-1], [False]))).sum() \
+             + np.where(left_is_closer, np.concatenate(([False], other_vs_other_diffs < real_diffs[1:])), np.concatenate((other_vs_other_diffs < real_diffs[:-1], [False]))).sum() \
+             + np.where(left_is_closer, np.concatenate(([False], other_vs_first_diffs < real_diffs[1:])), np.concatenate((other_vs_first_diffs < real_diffs[:-1], [False]))).sum()
+    n_total = n_motifs * 4
 
-    n_total = len(first_vs_first_diffs) * 8
+
+
+    # n_less = (first_vs_first_diffs < real_diffs[:-1]).sum() + (first_vs_first_diffs < real_diffs[1:]).sum() \
+    #  + (first_vs_other_diffs < real_diffs[:-1]).sum() + (first_vs_other_diffs < real_diffs[1:]).sum() \
+    #  + (other_vs_other_diffs < real_diffs[:-1]).sum() + (other_vs_other_diffs < real_diffs[1:]).sum() \
+    #  + (other_vs_first_diffs < real_diffs[:-1]).sum() + (other_vs_first_diffs < real_diffs[1:]).sum()
+    #
+    # n_total = len(first_vs_first_diffs) * 8
 
     return n_less, n_total
 
@@ -191,7 +205,7 @@ def get_start_time(node):
     """
     return getattr(node, TIME) - node.dist
 
-def calc_avg_dist(inodes, n_neighbours=2):
+def calc_avg_dist(inodes, n_neighbours=6):
     inode2avg_dist = {}
 
     def do_not_intersect(n1, n2):
@@ -214,7 +228,7 @@ def calc_avg_dist(inodes, n_neighbours=2):
                       if do_not_intersect(inode, n)]
         neighbours = sorted(neighbours,
                             key=lambda n: abs(get_start_time(n) - itime))[:n_neighbours]
-        inode2avg_dist[inode] = np.min([n.dist for n in neighbours])
+        inode2avg_dist[inode] = np.mean([n.dist for n in neighbours])
     return inode2avg_dist
 
 
@@ -263,36 +277,15 @@ def bdss_test(forest):
     all_compatible = both_compatible & grandparent_comparison
     child_grandpa_compatible = child_comparison & grandparent_comparison
 
-    prob_less_child = child_comparison.sum() / n_motifs
+    # prob_less_child = child_comparison.sum() / n_motifs
     prob_less_parent = parent_comparison.sum() / n_motifs
-    prob_less_grandpa = grandparent_comparison.sum() / n_motifs
+    # prob_less_grandpa = grandparent_comparison.sum() / n_motifs
     # print(prob_less, prob_less_child, prob_less_parent, prob_less_grandpa)
 
-    # pval1 = scipy.stats.binomtest(int(both_compatible.sum()),
-    #                              n=int(child_comparison.sum()), p=prob_less_parent, alternative='greater').pvalue # doesn't work
-    pval2 = scipy.stats.binomtest(int(all_compatible.sum()),
+    pval = scipy.stats.binomtest(int(all_compatible.sum()),
                                  n=int(child_grandpa_compatible.sum()), p=prob_less_parent, alternative='greater').pvalue
-    pval3 = scipy.stats.binomtest(int(all_compatible.sum()),
-                                 n=int(grandparent_comparison.sum()), p=prob_less_parent * prob_less_child, alternative='greater').pvalue # this one seems to work rather well too
 
-    all_cherries = []
-    for tree in forest:
-        all_cherries.extend(pick_cherries(tree, include_polytomies=True, external=False))
-    all_cherries = [c for c in sorted(all_cherries, key=lambda _: getattr(_.root, TIME)) if not c.root.is_root()]
-    child1_comparison = np.array(
-        [cherry.clustered_children[0].dist < inode2avg_dist[cherry.clustered_children[0]] for cherry in all_cherries])
-    child2_comparison = np.array(
-        [cherry.clustered_children[1].dist < inode2avg_dist[cherry.clustered_children[1]] for cherry in all_cherries])
-    root_comparison = np.array(
-        [cherry.root.dist < inode2avg_dist[cherry.root] for cherry in all_cherries])
-
-    children_compatible = child1_comparison & child2_comparison
-    all_compatible = children_compatible & root_comparison
-    prob_less_root = root_comparison.sum() / len(all_cherries)
-    pval1 = scipy.stats.binomtest(int(all_compatible.sum()),
-                                  n=int(children_compatible.sum()), p=prob_less_root, alternative='greater').pvalue
-
-    return pval1, pval2, pval3
+    return pval
 
 
 def cherry_diff_plot(forest, outfile=None):
@@ -371,34 +364,45 @@ The test therefore reports a probability of partner notification being present i
     parser.add_argument('--nwk', default='/home/azhukova/projects/bdct/simulations/BDSSCT0/tree.3.nwk', type=str, help="input forest file in newick or nexus format")
     params = parser.parse_args()
 
-    pvals1 = np.zeros(100, dtype=float)
-    pvals2 = np.zeros(100, dtype=float)
-    pvals3 = np.zeros(100, dtype=float)
+    pvals_bdss = np.zeros(100, dtype=float)
     pvals_bdei = np.zeros(100, dtype=float)
     pvals_ct = np.zeros(100, dtype=float)
 
-    for model in ('BDEI', 'BDSS', 'BD'):
+    result_table = np.zeros((7, 8), dtype=int)
+
+    models = ('BD', 'BDEI', 'BDSS', 'BDEISS', 'BDCT', 'BDEICT', 'BDSSCT', 'BDEISSCT')
+    for mi, model in enumerate(models):
         print(f"Model: {model}")
 
         for i in range(100):
-            forest = read_forest(f'/home/azhukova/projects/bdct/simulations/{model}CT0/tree.{i}.nwk')
-            pval_ct, _ = ct_test(forest)
-            pval1, pval2, pval3 = bdss_test(forest)
-            pval_bdei, _ = bdei_test(forest)
+            forest = read_forest(f'/home/azhukova/projects/bdeissct_dl/simulations_bdeissct/test/500_1000/{model}/tree.{i}.nwk')
 
-            pvals1[i] = pval1
-            pvals2[i] = pval2
-            pvals3[i] = pval3
-            pvals_bdei[i] = pval_bdei
-            pvals_ct[i] = pval_ct
+            pvals_bdss[i] = bdss_test(forest)
+            pvals_bdei[i] = bdei_test(forest)[0]
+            pvals_ct[i] = ct_test(forest)[0]
 
-        for label, pvals in (('CT test', pvals_ct), ('BDEI test', pvals_bdei),
-             ('BDSS test 1', pvals1), ('BDSS test 2', pvals2), ('BDSS test 3', pvals3),
-                             ('BDSS 1+BDEI test', np.maximum(pvals1, pvals_bdei) ),
-                             ('BDSS 1+BDSS 2 test', np.maximum(pvals1, pvals_bdei) )):
-            print(f"{label}:\t{sum(pvals < 0.05)} {pvals.min()} {pvals.mean()} {np.median(pvals)}")
+        # for label, pvals in (('CT test', pvals_ct), ('BDEI test', pvals_bdei),
+        #                      ('BDSS test', pvals_bdss),
+        #                      # ('BDSS or BDEI test', np.minimum(pvals_bdss, pvals_bdei) ),
+        #                      # ('BDSS and BDEI test', np.maximum(pvals_bdss, pvals_bdei) )
+        #                      ):
+        #     print(f"{label}:\t{sum(pvals < 0.05)} {pvals.min()} {pvals.mean()} {np.median(pvals)}")
 
-        print('-----------------------------------------------\n')
+        result_table[:, mi] = [(pvals_bdei < 0.05).sum(), (pvals_bdss < 0.05).sum(), (pvals_ct < 0.05).sum(), \
+                              ((pvals_bdei < 0.05) & (pvals_bdss < 0.05)).sum(), \
+                              ((pvals_bdei < 0.05) & (pvals_ct < 0.05)).sum(), \
+                              ((pvals_bdss < 0.05) & (pvals_ct < 0.05)).sum(), \
+                              ((pvals_bdei < 0.05) & (pvals_ct < 0.05) & (pvals_bdss < 0.05)).sum()]
+
+        # print('-----------------------------------------------\n')
+    print('\t' + '\t'.join(models))
+    print('EI\t', '\t'.join([f"{x:d}" for x in result_table[0, :]]))
+    print('SS\t', '\t'.join([f"{x:d}" for x in result_table[1, :]]))
+    print('CT\t', '\t'.join([f"{x:d}" for x in result_table[2, :]]))
+    print('EISS\t', '\t'.join([f"{x:d}" for x in result_table[3, :]]))
+    print('EICT\t', '\t'.join([f"{x:d}" for x in result_table[4, :]]))
+    print('SSCT\t', '\t'.join([f"{x:d}" for x in result_table[5, :]]))
+    print('EISSCT\t', '\t'.join([f"{x:d}" for x in result_table[6, :]]))
 
 
 if __name__ == '__main__':
