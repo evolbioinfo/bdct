@@ -223,19 +223,21 @@ def find_time_for_n_tips(tree, n_tips_threshold):
     return tip_times[n_tips_threshold - 1]
 
 
-def sky_test_new_strategy(tree, min_mann_whitney_samples=DEFAULT_MANN_WHITNEY_MIN_SAMPLES):
+def sky_test_new_strategy(tree, min_mann_whitney_samples=DEFAULT_MANN_WHITNEY_MIN_SAMPLES,
+                          n_tips_fraction_denominator: int = 4):
     """
     New strategy BD-Skyline test based on tip accumulation and subtree comparison.
 
     :param tree: ete3.Tree, the tree of interest
     :param min_mann_whitney_samples: int, minimum samples required for Mann-Whitney U test
+    :param n_tips_fraction_denominator: int, denominator for fraction of tips to use (e.g., 4 for N/4, 2 for N/2)
     :return: tuple of (evidence_found, test_results, bonferroni_evidence, split_times)
     """
     annotate_tree_with_time(tree)
     tree_height = max(getattr(node, TIME) for node in tree.traverse())
     total_tips = len(tree.get_leaves())
 
-    logging.info(f'Testing tree with height {tree_height:.4f} and {total_tips} tips')
+    logging.info(f'Testing tree with height {tree_height:.4f} and {total_tips} tips using N/{n_tips_fraction_denominator} tips for T.')
 
     if tree_height == 0:
         logging.warning("Tree height is zero, cannot perform SKY test.")
@@ -244,10 +246,10 @@ def sky_test_new_strategy(tree, min_mann_whitney_samples=DEFAULT_MANN_WHITNEY_MI
     results = {}
     split_times = {}
 
-    # Step 1: Find T based on N/2 tips
-    n_tips_for_T = total_tips // 4
+    # Step 1: Find T based on N/X tips (where X is n_tips_fraction_denominator)
+    n_tips_for_T = total_tips // n_tips_fraction_denominator
     if n_tips_for_T == 0:
-        logging.warning(f"Total tips ({total_tips}) is too low, N/2 tips for T is 0. Cannot determine T.")
+        logging.warning(f"Total tips ({total_tips}) is too low, N/{n_tips_fraction_denominator} tips for T is 0. Cannot determine T.")
         results['internal'] = results['external'] = None
         return False, results, False, split_times
 
@@ -260,7 +262,7 @@ def sky_test_new_strategy(tree, min_mann_whitney_samples=DEFAULT_MANN_WHITNEY_MI
         results['internal'] = results['external'] = None
         return False, results, False, split_times  # Early exit if T is invalid
 
-    logging.info(f"Determined T = {T:.4f} based on {n_tips_for_T} tips ({total_tips}/2).")
+    logging.info(f"Determined T = {T:.4f} based on {n_tips_for_T} tips (N/{n_tips_fraction_denominator}).")
 
     # Step 2: Study the largest subtree in the late interval [tree_height - T, tree_height]
     late_interval_start = tree_height - T
@@ -484,7 +486,7 @@ New BD-Skyline test for Birth-Death Skyline models.
 
 This strategy compares the largest subtree in the late interval of the original tree
 with the largest subtree in the early interval of a time-pruned tree.
-The interval size T is determined by the time at which N/2 tips are accumulated, where N is the total number of tips.
+The interval size T is determined by the time at which N/X tips are accumulated, where N is the total number of tips.
 """)
 
     parser.add_argument('--nwk', required=True, type=str,
@@ -512,9 +514,25 @@ The interval size T is determined by the time at which N/2 tips are accumulated,
         # Log total tips
         print(f"Total tips in tree: {total_tips}")
 
-        # Run the new strategy test
-        evidence_found, results, bonferroni_evidence, split_times = sky_test_new_strategy(tree,
-                                                                                          args.min_mw_samples)
+        # --- Primary run with N/4 tips ---
+        logging.info("Attempting BD-Skyline test with N/4 tips for T...")
+        evidence_found, results, bonferroni_evidence, split_times = sky_test_new_strategy(
+            tree, args.min_mw_samples, n_tips_fraction_denominator=4
+        )
+
+        # --- Rerun with N/2 tips if N/4 test failed (results is None) ---
+        if results is None:
+            logging.warning("N/4 tip analysis failed. Retrying BD-Skyline test with N/2 tips for T...")
+            # Create a fresh copy of the tree for the rerun to avoid any side effects from the previous run
+            tree_for_rerun = Tree(args.nwk, format=1)
+            evidence_found, results, bonferroni_evidence, split_times = sky_test_new_strategy(
+                tree_for_rerun, args.min_mw_samples, n_tips_fraction_denominator=2
+            )
+            if results is not None:
+                logging.info("N/2 tip analysis succeeded.")
+            else:
+                logging.error("N/2 tip analysis also failed. No results available.")
+
 
         # Print split times prominently
         print("\n" + "=" * 50)
@@ -530,12 +548,30 @@ The interval size T is determined by the time at which N/2 tips are accumulated,
 
         if 'T_from_tips' in split_times and split_times['T_from_tips'] is not None:
             split_time_T = split_times['T_from_tips']
-            n_tips_for_T_display = total_tips // 2  # Recalculate for display
+            # Determine which N fraction was actually used for display purposes
+            used_fraction_denominator = 4 if results is None else (2 if results is not None and split_times.get('n_tips_for_T_used') == total_tips // 2 else 4)
+            # A more robust way to get the exact N/X used in the successful run:
+            # You might want to modify sky_test_new_strategy to return the `n_tips_for_T` it actually used.
+            # For now, let's assume if results is not None, it's from the N/2 run if the N/4 failed.
+            if results is not None and split_times.get('n_tips_for_T_used') is not None: # Check if the split_times dict contains info on what was used.
+                n_tips_for_T_display = split_times['n_tips_for_T_used']
+                # Reconstruct denominator for display. This is a heuristic.
+                if n_tips_for_T_display == total_tips // 4:
+                    used_fraction_denominator = 4
+                elif n_tips_for_T_display == total_tips // 2:
+                    used_fraction_denominator = 2
+                else:
+                    used_fraction_denominator = "Unknown" # Fallback
+
+            else: # If results is None, no T was found successfully.
+                 n_tips_for_T_display = "N/A"
+                 used_fraction_denominator = "N/A"
+
             percentage = (split_time_T / tree_height) * 100 if tree_height > 0 else 0
             print(
-                f"Time (T) based on {n_tips_for_T_display} tips (N/2): {split_time_T:.6f} ({percentage:.1f}% of tree height)")
+                f"Time (T) based on {n_tips_for_T_display} tips (N/{used_fraction_denominator}): {split_time_T:.6f} ({percentage:.1f}% of tree height)")
         else:
-            print("Time (T) based on N/2 tips: Not available (insufficient tips or calculation error)")
+            print("Time (T) based on N/X tips: Not available (insufficient tips or calculation error)")
 
         print(f"Tree height: {tree_height:.6f}")  # Moved here for better visibility
         print("=" * 50)
@@ -549,24 +585,32 @@ The interval size T is determined by the time at which N/2 tips are accumulated,
             print("\nNEW SKY test: No evidence of BD-Skyline model (consistent with simple BD)")
 
         # Print detailed results
-        for branch_type in ['internal', 'external']:
-            print(results)
-            if results[branch_type] is not None:
-                result = results[branch_type]
-                print(f"\n{branch_type.capitalize()} branches (new strategy comparison):")
-                print(f"  T used = {result['T']:.4f}")
-                print(
-                    f"  Early subtree interval [{result['early_interval'][0]:.4f}, {result['early_interval'][1]:.4f}]: {result['early_count']} branches")
-                print(
-                    f"  Late subtree interval [{result['late_interval'][0]:.4f}, {result['late_interval'][1]:.4f}]: {result['late_count']} branches")
-                print(f"  Mann-Whitney U statistic: {result['u_statistic']:.4f}")
-                print(f"  p-value: {result['p_value']:.6f}")
-            else:
-                print(f"\n{branch_type.capitalize()} branches: Not enough data for comparison.")
+        # This block now uses the `results` variable, which might be from N/4 or N/2 run, or still None
+        if results is not None:
+            for branch_type in ['internal', 'external']:
+                if results[branch_type] is not None:
+                    result = results[branch_type]
+                    print(f"\n{branch_type.capitalize()} branches (new strategy comparison):")
+                    print(f"  T used = {result['T']:.4f}")
+                    print(
+                        f"  Early subtree interval [{result['early_interval'][0]:.4f}, {result['early_interval'][1]:.4f}]: {result['early_count']} branches")
+                    print(
+                        f"  Late subtree interval [{result['late_interval'][0]:.4f}, {result['late_interval'][1]:.4f}]: {result['late_count']} branches")
+                    print(f"  Mann-Whitney U statistic: {result['u_statistic']:.4f}")
+                    print(f"  p-value: {result['p_value']:.6f}")
+                else:
+                    print(f"\n{branch_type.capitalize()} branches: Not enough data for comparison.")
+        else:
+            print("\nNo detailed branch results available due to insufficient data or analysis errors from any attempt.")
+
 
         # Generate plot if requested
         if args.plot:
-            plot_early_vs_late_results(tree, results, args.plot)
+            if results is not None: # Plot only if results are available from any run
+                plot_early_vs_late_results(tree, results, args.plot)
+            else:
+                logging.warning("Skipping plot generation as no valid results were obtained from any test attempt.")
+
 
         # Write log if requested
         if args.log:
@@ -579,36 +623,51 @@ The interval size T is determined by the time at which N/2 tips are accumulated,
                 f.write('-----------------\n')
                 if 'T_from_tips' in split_times and split_times['T_from_tips'] is not None:
                     split_time_T = split_times['T_from_tips']
-                    n_tips_for_T_display = total_tips // 2
+                    # Determine which N fraction was actually used for display purposes in log
+                    if results is not None and split_times.get('n_tips_for_T_used') is not None:
+                        n_tips_for_T_display = split_times['n_tips_for_T_used']
+                        if n_tips_for_T_display == total_tips // 4:
+                            used_fraction_denominator = 4
+                        elif n_tips_for_T_display == total_tips // 2:
+                            used_fraction_denominator = 2
+                        else:
+                            used_fraction_denominator = "Unknown"
+                    else:
+                         n_tips_for_T_display = "N/A"
+                         used_fraction_denominator = "N/A"
+
                     percentage = (split_time_T / tree_height) * 100 if tree_height > 0 else 0
                     f.write(
-                        f"Time (T) based on {n_tips_for_T_display} tips (N/2): {split_time_T:.6f} ({percentage:.1f}% of tree height)\n")
+                        f"Time (T) based on {n_tips_for_T_display} tips (N/{used_fraction_denominator}): {split_time_T:.6f} ({percentage:.1f}% of tree height)\n")
                 else:
-                    f.write("Time (T) based on N/2 tips: Not available (insufficient tips or calculation error)\n")
+                    f.write("Time (T) based on N/X tips: Not available (insufficient tips or calculation error)\n")
+
 
                 f.write(f'\nEvidence of skyline model (uncorrected): {"Yes" if evidence_found else "No"}\n')
                 f.write(f'Evidence of skyline model (Bonferroni): {"Yes" if bonferroni_evidence else "No"}\n')
 
-                for branch_type in ['internal', 'external']:
-                    if results[branch_type] is not None:
-                        result = results[branch_type]
-                        # === ONLY THIS PART IS MODIFIED FOR THE SYNTAXERROR FIX ===
-                        early_start = result["early_interval"][0]
-                        early_end = result["early_interval"][1]
-                        late_start = result["late_interval"][0]
-                        late_end = result["late_interval"][1]
+                if results is not None: # Log detailed results only if available
+                    for branch_type in ['internal', 'external']:
+                        if results[branch_type] is not None:
+                            result = results[branch_type]
+                            early_start = result["early_interval"][0]
+                            early_end = result["early_interval"][1]
+                            late_start = result["late_interval"][0]
+                            late_end = result["late_interval"][1]
 
-                        f.write(f'\n{branch_type.capitalize()} branches (new strategy):\n')
-                        f.write(f'  T used = {result["T"]:.6f}\n')
-                        f.write(
-                            f'  Early subtree interval: [{early_start:.6f}, {early_end:.6f}] ({result["early_count"]} branches)\n')
-                        f.write(
-                            f'  Late subtree interval: [{late_start:.6f}, {late_end:.6f}] ({result["late_count"]} branches)\n')
-                        # === END OF MODIFICATION ===
-                        f.write(f'  Mann-Whitney U statistic: {result["u_statistic"]:.6f}\n')
-                        f.write(f'  p-value: {result["p_value"]:.6f}\n')
-                    else:
-                        f.write(f'\n{branch_type.capitalize()} branches: Not enough data for comparison.\n')
+                            f.write(f'\n{branch_type.capitalize()} branches (new strategy):\n')
+                            f.write(f'  T used = {result["T"]:.6f}\n')
+                            f.write(
+                                f'  Early subtree interval: [{early_start:.6f}, {early_end:.6f}] ({result["early_count"]} branches)\n')
+                            f.write(
+                                f'  Late subtree interval: [{late_start:.6f}, {late_end:.6f}] ({result["late_count"]} branches)\n')
+                            f.write(f'  Mann-Whitney U statistic: {result["u_statistic"]:.6f}\n')
+                            f.write(f'  p-value: {result["p_value"]:.6f}\n')
+                        else:
+                            f.write(f'\n{branch_type.capitalize()} branches: Not enough data for comparison.\n')
+                else: # Message if no results available for logging
+                    f.write("\nNo detailed branch results could be generated due to insufficient data or analysis errors from any attempt.\n")
+
 
     except Exception as e:
         logging.error(f"Error running new BD-Skyline test: {e}", exc_info=True)
