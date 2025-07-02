@@ -1,4 +1,5 @@
 import logging
+from collections import defaultdict
 
 import numpy as np
 import scipy
@@ -236,15 +237,8 @@ def bdss_test(forest):
     """
     Tests if the input forest was generated under a BDSS (Birth-Death with Superspreading) model.
 
-    Inspired by BDEI test logic but adapted for triplets:
-    - Detects triplets (parent + 2 internal children) and sorts by split time
-    - Calculates parent-child branch length differences within triplets
-    - Swaps parent lengths between neighboring triplets
-    - Tests if real differences are smaller than reshuffled differences more often than expected
-    - Uses binomial test with alternative='greater' (counting real < reshuffled)
-
     :param forest: list of trees
-    :return: pval, n_triplets
+    :return: pval
     """
     annotate_forest_with_time(forest)
 
@@ -286,6 +280,102 @@ def bdss_test(forest):
                                  n=int(child_grandpa_compatible.sum()), p=prob_less_parent, alternative='greater').pvalue
 
     return pval
+
+def prune(tr, to_remove=lambda tip: False):
+    """
+    Removes all the branches leading to tips identified positively by to_remove function.
+    :param tr: the tree of interest (ete3 Tree)
+    :param to_remove: a method to check is a tip should be removed.
+    :return: ete3.Tree: the pruned tree.
+    """
+
+    tips = [tip for tip in tr if to_remove(tip)]
+    for node in tips:
+        if node.is_root():
+            return None
+        parent = node.up
+        parent.remove_child(node)
+        # If the parent node has only one child now, merge them.
+        if len(parent.children) == 1:
+            brother = parent.children[0]
+            brother.dist += parent.dist
+            if parent.is_root():
+                brother.up = None
+                tr = brother
+            else:
+                grandparent = parent.up
+                grandparent.remove_child(parent)
+                grandparent.add_child(brother)
+    return tr
+
+def sky_test(forest):
+    """
+    Tests if the input forest was generated under a Skyline model.
+
+
+    :param forest: list of trees
+    :return: pval
+    """
+    annotate_forest_with_time(forest)
+    n_tips = sum(len(tree) for tree in forest)
+    tip_times = sorted(getattr(_, TIME) for tree in forest for _ in tree)
+    T = tip_times[-1]
+
+    n2time = defaultdict(lambda: 0)
+
+
+    for tree in forest:
+        for n in tree.traverse():
+            size = len(n)
+            time = getattr(n, TIME)
+            if time > n2time[size]:
+                n2time[size] = time
+
+    for n in range(n_tips - 1, 0, -1):
+        n2time[n] = max(n2time[n + 1], n2time[n])
+
+    best_n = None
+    best_diff = np.inf
+    for n in range(20, n_tips // 2):
+        t_top = tip_times[n]
+        t_bottom = T - n2time[n]
+        if np.abs(t_top - t_bottom) < best_diff:
+            best_diff = np.abs(t_top - t_bottom)
+            best_n = n
+
+
+    threshold_time = max(tip_times[best_n], T - n2time[best_n])
+
+    bottom_trees = []
+    todo = list(forest)
+    while todo:
+        n = todo.pop()
+        if getattr(n, TIME) < (T - threshold_time):
+            todo.extend(n.children)
+        elif len(n) >= 20:
+            bottom_trees.append(n)
+
+    def get_branch_len(tree):
+        ids, eds = [], []
+        for n in tree.traverse():
+            if n == tree:
+                continue
+            (eds if n.is_leaf() else ids).append(n.dist)
+        return ids, eds
+
+    bottom_tree = min(bottom_trees, key=lambda _: np.abs(len(_) - best_n))
+    bottom_tree_len = sorted([len(_) for _ in bottom_trees])
+    ids_bottom, eds_bottom = get_branch_len(bottom_tree)
+
+    top_trees = [prune(t, lambda tip: getattr(tip, TIME) > threshold_time) for t in forest]
+    top_tree = max(top_trees, key=lambda _: len(_))
+    ids_top, eds_top = get_branch_len(top_tree)
+
+
+    pval_i = scipy.stats.kstest(ids_bottom, ids_top).pvalue
+    pval_e = scipy.stats.kstest(eds_bottom, eds_top).pvalue
+
+    return pval_i, pval_e
 
 
 def cherry_diff_plot(forest, outfile=None):
@@ -364,22 +454,32 @@ The test therefore reports a probability of partner notification being present i
     parser.add_argument('--nwk', default='/home/azhukova/projects/bdct/simulations/BDSSCT0/tree.3.nwk', type=str, help="input forest file in newick or nexus format")
     params = parser.parse_args()
 
+    forest = read_forest(f'/home/azhukova/projects/bdct/simulations_bdsky/trees/tree.0.nwk')
+    sky_test(forest)
+
+
     pvals_bdss = np.zeros(100, dtype=float)
     pvals_bdei = np.zeros(100, dtype=float)
     pvals_ct = np.zeros(100, dtype=float)
+    pvals_sky_i = np.zeros(100, dtype=float)
+    pvals_sky_e = np.zeros(100, dtype=float)
 
-    result_table = np.zeros((7, 8), dtype=int)
+    result_table = np.zeros((10, 9), dtype=int)
 
-    models = ('BD', 'BDEI', 'BDSS', 'BDEISS', 'BDCT', 'BDEICT', 'BDSSCT', 'BDEISSCT')
+    models = ('BD', 'BDEI', 'BDSS', 'BDEISS', 'BDCT', 'BDEICT', 'BDSSCT', 'BDEISSCT', 'BDSKY')
     for mi, model in enumerate(models):
         print(f"Model: {model}")
 
         for i in range(100):
-            forest = read_forest(f'/home/azhukova/projects/bdeissct_dl/simulations_bdeissct/test/500_1000/{model}/tree.{i}.nwk')
+            if model != 'BDSKY':
+                forest = read_forest(f'/home/azhukova/projects/bdeissct_dl/simulations_bdeissct/test/500_1000/{model}/tree.{i}.nwk')
+            else:
+                forest = read_forest(f'/home/azhukova/projects/bdct/simulations_bdsky/trees/tree.{i}.nwk')
 
             pvals_bdss[i] = bdss_test(forest)
             pvals_bdei[i] = bdei_test(forest)[0]
             pvals_ct[i] = ct_test(forest)[0]
+            pvals_sky_i[i], pvals_sky_e[i] = sky_test(forest)
 
         # for label, pvals in (('CT test', pvals_ct), ('BDEI test', pvals_bdei),
         #                      ('BDSS test', pvals_bdss),
@@ -392,7 +492,10 @@ The test therefore reports a probability of partner notification being present i
                               ((pvals_bdei < 0.05) & (pvals_bdss < 0.05)).sum(), \
                               ((pvals_bdei < 0.05) & (pvals_ct < 0.05)).sum(), \
                               ((pvals_bdss < 0.05) & (pvals_ct < 0.05)).sum(), \
-                              ((pvals_bdei < 0.05) & (pvals_ct < 0.05) & (pvals_bdss < 0.05)).sum()]
+                              ((pvals_bdei < 0.05) & (pvals_ct < 0.05) & (pvals_bdss < 0.05)).sum(), \
+                               (pvals_sky_i < 0.05).sum(), (pvals_sky_e < 0.05).sum() ,\
+                              ((pvals_sky_i < 0.05) | (pvals_sky_e < 0.05)).sum() \
+                               ]
 
         # print('-----------------------------------------------\n')
     print('\t' + '\t'.join(models))
@@ -403,6 +506,9 @@ The test therefore reports a probability of partner notification being present i
     print('EICT\t', '\t'.join([f"{x:d}" for x in result_table[4, :]]))
     print('SSCT\t', '\t'.join([f"{x:d}" for x in result_table[5, :]]))
     print('EISSCT\t', '\t'.join([f"{x:d}" for x in result_table[6, :]]))
+    print('SKY_i\t', '\t'.join([f"{x:d}" for x in result_table[7, :]]))
+    print('SKY_e\t', '\t'.join([f"{x:d}" for x in result_table[8, :]]))
+    print('SKY\t', '\t'.join([f"{x:d}" for x in result_table[8, :]]))
 
 
 if __name__ == '__main__':
