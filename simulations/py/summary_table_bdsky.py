@@ -2,26 +2,185 @@ import re
 import pandas as pd
 import logging
 import os
+import numpy as np
 
 # Set up basic logging for this script
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+
+def analyze_fn_case(log_content, T_value, num_tips):
+    """
+    Analyze FN cases to understand why skyline was not detected.
+    Returns a dictionary with analysis metrics.
+    """
+    analysis = {
+        'early_branch_count': 0,
+        'late_branch_count': 0,
+        'interval_balance': 0.0,  # Ratio of smaller/larger interval
+        'short_interval_flag': False,
+        'T_percentage': 0.0,
+        'extreme_T_flag': False,
+        'u_stat_closeness': 'N/A',
+        'pval_closeness': 'N/A',
+        'fn_explanation': 'Unknown'
+    }
+
+    # Extract branch counts from internal and external sections
+    internal_early_count = 0
+    internal_late_count = 0
+    external_early_count = 0
+    external_late_count = 0
+
+    # Parse internal branch counts
+    internal_match = re.search(
+        r'Internal branches \(new strategy(?: comparison)?\):\s*'
+        r'.*?Early subtree interval: .*?\((\d+) branches\)\s*'
+        r'.*?Late subtree interval: .*?\((\d+) branches\)',
+        log_content, re.DOTALL
+    )
+    if internal_match:
+        internal_early_count = int(internal_match.group(1))
+        internal_late_count = int(internal_match.group(2))
+
+    # Parse external branch counts
+    external_match = re.search(
+        r'External branches \(new strategy(?: comparison)?\):\s*'
+        r'.*?Early subtree interval: .*?\((\d+) branches\)\s*'
+        r'.*?Late subtree interval: .*?\((\d+) branches\)',
+        log_content, re.DOTALL
+    )
+    if external_match:
+        external_early_count = int(external_match.group(1))
+        external_late_count = int(external_match.group(2))
+
+    # Calculate total branch counts
+    total_early = internal_early_count + external_early_count
+    total_late = internal_late_count + external_late_count
+
+    analysis['early_branch_count'] = total_early
+    analysis['late_branch_count'] = total_late
+
+    # Calculate interval balance (how balanced are the intervals)
+    if total_early > 0 and total_late > 0:
+        analysis['interval_balance'] = min(total_early, total_late) / max(total_early, total_late)
+
+    # Flag if one interval is very short (< 10% of total branches)
+    total_branches = total_early + total_late
+    if total_branches > 0:
+        min_interval_ratio = min(total_early, total_late) / total_branches
+        analysis['short_interval_flag'] = min_interval_ratio < 0.1
+
+    # Calculate T percentage of tree height
+    tree_height_match = re.search(r'Tree height:\s*([\d.]+)', log_content)
+    if tree_height_match and T_value > 0:
+        tree_height = float(tree_height_match.group(1))
+        if tree_height > 0:
+            analysis['T_percentage'] = (T_value / tree_height) * 100
+            # Flag extreme T values (< 10% or > 90% of tree height)
+            analysis['extreme_T_flag'] = analysis['T_percentage'] < 10 or analysis['T_percentage'] > 90
+
+    # Analyze U statistics closeness (how close to expected under null hypothesis)
+    internal_u_match = re.search(r'Internal branches.*?Mann-Whitney U statistic: ([\d.]+)', log_content, re.DOTALL)
+    external_u_match = re.search(r'External branches.*?Mann-Whitney U statistic: ([\d.]+)', log_content, re.DOTALL)
+
+    if internal_u_match and external_u_match:
+        internal_u = float(internal_u_match.group(1))
+        external_u = float(external_u_match.group(1))
+
+        # Expected U under null hypothesis is n1*n2/2
+        if internal_early_count > 0 and internal_late_count > 0:
+            expected_internal_u = (internal_early_count * internal_late_count) / 2
+            internal_deviation = abs(
+                internal_u - expected_internal_u) / expected_internal_u if expected_internal_u > 0 else 0
+        else:
+            internal_deviation = 0
+
+        if external_early_count > 0 and external_late_count > 0:
+            expected_external_u = (external_early_count * external_late_count) / 2
+            external_deviation = abs(
+                external_u - expected_external_u) / expected_external_u if expected_external_u > 0 else 0
+        else:
+            external_deviation = 0
+
+        # Average deviation from expected U
+        avg_deviation = (internal_deviation + external_deviation) / 2 if (
+                                                                                     internal_deviation + external_deviation) > 0 else 0
+
+        if avg_deviation < 0.05:  # Within 5% of expected
+            analysis['u_stat_closeness'] = 'Very close (±5%)'
+        elif avg_deviation < 0.10:  # Within 10% of expected
+            analysis['u_stat_closeness'] = 'Close (±10%)'
+        elif avg_deviation < 0.20:  # Within 20% of expected
+            analysis['u_stat_closeness'] = 'Moderate (±20%)'
+        else:
+            analysis['u_stat_closeness'] = 'Different (>20%)'
+
+    # Analyze p-value closeness to significance
+    internal_pval_match = re.search(r'Internal branches.*?p-value: ([\d.e-]+)', log_content, re.DOTALL)
+    external_pval_match = re.search(r'External branches.*?p-value: ([\d.e-]+)', log_content, re.DOTALL)
+
+    min_pval = 1.0
+    if internal_pval_match:
+        internal_pval = float(internal_pval_match.group(1))
+        min_pval = min(min_pval, internal_pval)
+    if external_pval_match:
+        external_pval = float(external_pval_match.group(1))
+        min_pval = min(min_pval, external_pval)
+
+    if min_pval < 1.0:
+        if min_pval > 0.2:
+            analysis['pval_closeness'] = 'Far from significant (>0.2)'
+        elif min_pval > 0.1:
+            analysis['pval_closeness'] = 'Moderate (0.1-0.2)'
+        elif min_pval > 0.05:
+            analysis['pval_closeness'] = 'Close to significant (0.05-0.1)'
+        else:
+            analysis['pval_closeness'] = 'Significant (<0.05)'
+
+    # Generate explanation for FN
+    explanations = []
+
+    if analysis['short_interval_flag']:
+        explanations.append("One interval too short")
+
+    if analysis['extreme_T_flag']:
+        if analysis['T_percentage'] < 10:
+            explanations.append("T too early in tree")
+        else:
+            explanations.append("T too late in tree")
+
+    if analysis['u_stat_closeness'] in ['Very close (±5%)', 'Close (±10%)']:
+        explanations.append("Branch lengths too similar")
+
+    if analysis['interval_balance'] > 0.8:
+        explanations.append("Well-balanced intervals")
+
+    if not explanations:
+        explanations.append("Insufficient signal")
+
+    analysis['fn_explanation'] = "; ".join(explanations)
+
+    return analysis
+
 
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Summarize results from the new BD-Skyline test (bdsky_test.py log files).")
+        description="Summarize results from the new BD-Skyline test (bdsky_test.py log files) with FN analysis.")
     parser.add_argument('--logs', nargs='+', type=str,
                         help="BD-Skyline test results log files generated by bdsky_test.py")
     parser.add_argument('--tab', type=str, help="Output summary table file (TSV format)")
     parser.add_argument('--verbose', action='store_true', help="Enable verbose logging for debugging parsing issues")
     params = parser.parse_args()
 
-    # Define the columns specifically for the new bdsky_test.py output
+    # Define the columns with additional FN analysis columns
     df = pd.DataFrame(
         columns=['model', 'tree/forest', 'id', 'BDSKY_evidence', 'evidence_binary',
                  'internal_u_stat', 'external_u_stat', 'internal_pval', 'external_pval',
-                 'T_value', 'num_tips', 'result', 'test_type', 'filepath'])
+                 'T_value', 'T_percentage', 'num_tips', 'result', 'test_type', 'filepath',
+                 'early_branches', 'late_branches', 'interval_balance', 'short_interval_flag',
+                 'extreme_T_flag', 'u_stat_closeness', 'pval_closeness', 'fn_explanation'])
 
     if not params.logs:
         logging.error("No log files provided. Please use --logs to specify input log files.")
@@ -70,6 +229,7 @@ if __name__ == "__main__":
                 internal_pval = float('nan')
                 external_pval = float('nan')
                 T_value = float('nan')
+                T_percentage = float('nan')
                 num_tips = 0
 
                 # Parse total tips
@@ -83,6 +243,12 @@ if __name__ == "__main__":
                     t_match = re.search(r'Time \(T\) based on \d+ tips:\s*([\d.]+)', content)
                 if t_match:
                     T_value = float(t_match.group(1))
+
+                # Parse T percentage
+                t_perc_match = re.search(r'Time \(T\) based on \d+ tips.*?:\s*[\d.]+\s*\(([\d.]+)% of tree height\)',
+                                         content)
+                if t_perc_match:
+                    T_percentage = float(t_perc_match.group(1))
 
                 # Parse internal branches results
                 internal_section_match = re.search(
@@ -139,6 +305,16 @@ if __name__ == "__main__":
                 # Set evidence text based on binary value
                 evidence_text = "Yes" if evidence_binary == 1 else "No"
 
+                # Determine result classification (TP, FN, FP, TN)
+                result = 'UNDEF'  # Default
+                if model == 'BDSKY':
+                    result = 'TP' if evidence_binary == 1 else 'FN'
+                elif model == 'BD':
+                    result = 'TN' if evidence_binary == 0 else 'FP'
+
+                # Perform FN analysis
+                fn_analysis = analyze_fn_case(content, T_value, num_tips)
+
                 # Debug logging
                 if params.verbose:
                     logging.debug(f"File: {log_path}")
@@ -149,22 +325,23 @@ if __name__ == "__main__":
                     logging.debug(f"Internal U stat: {internal_u_stat:.4f}, Pval: {internal_pval}")
                     logging.debug(f"External U stat: {external_u_stat:.4f}, Pval: {external_pval}")
                     logging.debug(f"Evidence: {evidence_text} ({evidence_binary})")
-
-                # Determine result classification (TP, FN, FP, TN)
-                result = 'UNDEF'  # Default
-                if model == 'BDSKY':
-                    result = 'TP' if evidence_binary == 1 else 'FN'
-                elif model == 'BD':
-                    result = 'TN' if evidence_binary == 0 else 'FP'
+                    if result == 'FN':
+                        logging.debug(f"FN Analysis: {fn_analysis}")
 
                 # Add data to DataFrame
                 df.loc[f'{os.path.basename(log_path)}',  # Using filename as index
                 ['model', 'tree/forest', 'id', 'BDSKY_evidence', 'evidence_binary',
                  'internal_u_stat', 'external_u_stat', 'internal_pval', 'external_pval',
-                 'T_value', 'num_tips', 'result', 'test_type', 'filepath']] = [
+                 'T_value', 'T_percentage', 'num_tips', 'result', 'test_type', 'filepath',
+                 'early_branches', 'late_branches', 'interval_balance', 'short_interval_flag',
+                 'extreme_T_flag', 'u_stat_closeness', 'pval_closeness', 'fn_explanation']] = [
                     model, data_type, i, evidence_text, evidence_binary,
                     internal_u_stat, external_u_stat, internal_pval, external_pval,
-                    T_value, num_tips, result, test_type, log_path
+                    T_value, T_percentage, num_tips, result, test_type, log_path,
+                    fn_analysis['early_branch_count'], fn_analysis['late_branch_count'],
+                    fn_analysis['interval_balance'], fn_analysis['short_interval_flag'],
+                    fn_analysis['extreme_T_flag'], fn_analysis['u_stat_closeness'],
+                    fn_analysis['pval_closeness'], fn_analysis['fn_explanation']
                 ]
 
             except Exception as e:
@@ -186,7 +363,8 @@ if __name__ == "__main__":
     # --- Global statistics ---
     # Ensure numeric columns are actually numeric before calculating statistics
     numeric_columns = ['evidence_binary', 'internal_u_stat', 'external_u_stat',
-                       'internal_pval', 'external_pval', 'T_value', 'num_tips']
+                       'internal_pval', 'external_pval', 'T_value', 'T_percentage', 'num_tips',
+                       'early_branches', 'late_branches', 'interval_balance']
     for col in numeric_columns:
         # Only convert if the column might contain floats, otherwise leave 'N/A (Insufficient Data)' as string
         if col in ['internal_pval', 'external_pval']:
@@ -215,6 +393,40 @@ if __name__ == "__main__":
     print(f'\tAccuracy={accuracy:.4f}, Precision={precision:.4f}')
     print('==============\n')
 
+    # --- FN Analysis Summary ---
+    fn_cases = df[df['result'] == 'FN']
+    if len(fn_cases) > 0:
+        print(f'\n=== FALSE NEGATIVE ANALYSIS ({len(fn_cases)} cases) ===')
+        print(f'Common explanations for FN:')
+
+        # Count explanations
+        explanations = {}
+        for explanation in fn_cases['fn_explanation']:
+            for exp in str(explanation).split(';'):
+                exp = exp.strip()
+                explanations[exp] = explanations.get(exp, 0) + 1
+
+        for exp, count in sorted(explanations.items(), key=lambda x: x[1], reverse=True):
+            percentage = (count / len(fn_cases)) * 100
+            print(f'\t{exp}: {count} cases ({percentage:.1f}%)')
+
+        print(f'\nFN Parameter Analysis:')
+        print(f'\tAverage T percentage: {fn_cases["T_percentage"].mean():.1f}% of tree height')
+        print(f'\tAverage interval balance: {fn_cases["interval_balance"].mean():.3f}')
+        print(
+            f'\tShort interval cases: {fn_cases["short_interval_flag"].sum()} ({(fn_cases["short_interval_flag"].sum() / len(fn_cases) * 100):.1f}%)')
+        print(
+            f'\tExtreme T cases: {fn_cases["extreme_T_flag"].sum()} ({(fn_cases["extreme_T_flag"].sum() / len(fn_cases) * 100):.1f}%)')
+
+        # U statistic closeness distribution
+        print(f'\nU statistic closeness distribution:')
+        u_closeness_counts = fn_cases['u_stat_closeness'].value_counts()
+        for closeness, count in u_closeness_counts.items():
+            percentage = (count / len(fn_cases)) * 100
+            print(f'\t{closeness}: {count} cases ({percentage:.1f}%)')
+
+        print('==============\n')
+
     # --- Statistics by model ---
     print(f'\n=== RESULTS BY MODEL ===')
 
@@ -235,6 +447,7 @@ if __name__ == "__main__":
                 mean_internal_pval = ddf['internal_pval'].mean()
                 mean_external_pval = ddf['external_pval'].mean()
                 mean_T = ddf['T_value'].mean()
+                mean_T_perc = ddf['T_percentage'].mean()
 
                 num_detected = len(ddf[ddf['evidence_binary'] == 1])
                 percentage_detected = 100 * num_detected / len(ddf) if len(ddf) > 0 else 0.0
@@ -269,6 +482,7 @@ if __name__ == "__main__":
                 print(f'\tavg internal p-val\t{mean_internal_pval:.6f}')
                 print(f'\tavg external p-val\t{mean_external_pval:.6f}')
                 print(f'\tavg T\t{mean_T:.4f}')
+                print(f'\tavg T percentage\t{mean_T_perc:.1f}%')
                 print(f'\tavg num tips\t{tips_mean:.0f}\t[{tips_min:.0f}-{tips_max:.0f}]' if not pd.isna(
                     tips_mean) else '\tavg num tips\tNaN')
 
@@ -290,6 +504,34 @@ if __name__ == "__main__":
                     # Print filenames for FN/FP cases
                     file_list = '\t'.join(f'{os.path.basename(_)}' for _ in ddff['filepath'].to_list())
                     print(f'\tfilenames\t{file_list}')
+
+                    # Enhanced FN analysis
+                    fn_subset = ddff[ddff['result'] == 'FN']
+                    if len(fn_subset) > 0:
+                        print(f'\t--- FN Analysis ({len(fn_subset)} cases) ---')
+
+                        # T percentage analysis
+                        t_perc_list = '\t'.join(
+                            f'{float(_):.1f}%' if pd.notna(_) else 'nan' for _ in fn_subset['T_percentage'].to_list())
+                        print(f'\tT percentages\t{t_perc_list}')
+
+                        # Interval balance analysis
+                        balance_list = '\t'.join(
+                            f'{float(_):.3f}' if pd.notna(_) else 'nan' for _ in
+                            fn_subset['interval_balance'].to_list())
+                        print(f'\tInterval balance\t{balance_list}')
+
+                        # U statistic closeness
+                        u_close_list = '\t'.join(str(_) for _ in fn_subset['u_stat_closeness'].to_list())
+                        print(f'\tU stat closeness\t{u_close_list}')
+
+                        # P-value closeness
+                        pval_close_list = '\t'.join(str(_) for _ in fn_subset['pval_closeness'].to_list())
+                        print(f'\tP-val closeness\t{pval_close_list}')
+
+                        # FN explanations
+                        explanation_list = '\t'.join(str(_) for _ in fn_subset['fn_explanation'].to_list())
+                        print(f'\tFN explanations\t{explanation_list}')
                 else:
                     print('\tNo FN/FP entries for this model/data type.')
 
