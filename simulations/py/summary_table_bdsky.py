@@ -22,7 +22,11 @@ def analyze_fn_case(log_content, T_value, num_tips):
         'extreme_T_flag': False,
         'u_stat_closeness': 'N/A',
         'pval_closeness': 'N/A',
-        'fn_explanation': 'Unknown'
+        'fn_explanation': 'Unknown',
+        'T_top': 'N/A',
+        'T_bottom': 'N/A',
+        'T_fallback': 'N/A',
+        'dominant_criterion': 'N/A'
     }
 
     # Extract branch counts from internal and external sections
@@ -31,9 +35,30 @@ def analyze_fn_case(log_content, T_value, num_tips):
     external_early_count = 0
     external_late_count = 0
 
+    # Parse robust T calculation details
+    t_top_match = re.search(r'T_top \(tip accumulation\):\s*([\d.]+)', log_content)
+    if t_top_match:
+        analysis['T_top'] = float(t_top_match.group(1))
+
+    t_bottom_match = re.search(r'T_bottom \(bottom structure\):\s*([\d.]+|N/A)', log_content)
+    if t_bottom_match and t_bottom_match.group(1) != 'N/A':
+        try:
+            analysis['T_bottom'] = float(t_bottom_match.group(1))
+        except ValueError:
+            analysis['T_bottom'] = 'N/A'
+
+    t_fallback_match = re.search(r'T_fallback \(midpoint\):\s*([\d.]+)', log_content)
+    if t_fallback_match:
+        analysis['T_fallback'] = float(t_fallback_match.group(1))
+
+    # Parse dominant criterion
+    dominant_match = re.search(r'Dominant criterion:\s*([^\n]+)', log_content)
+    if dominant_match:
+        analysis['dominant_criterion'] = dominant_match.group(1).strip()
+
     # Parse internal branch counts
     internal_match = re.search(
-        r'Internal branches \(new strategy(?: comparison)?\):\s*'
+        r'Internal branches \((?:new strategy|robust strategy)(?: comparison)?\):\s*'
         r'.*?Early subtree interval: .*?\((\d+) branches\)\s*'
         r'.*?Late subtree interval: .*?\((\d+) branches\)',
         log_content, re.DOTALL
@@ -44,7 +69,7 @@ def analyze_fn_case(log_content, T_value, num_tips):
 
     # Parse external branch counts
     external_match = re.search(
-        r'External branches \(new strategy(?: comparison)?\):\s*'
+        r'External branches \((?:new strategy|robust strategy)(?: comparison)?\):\s*'
         r'.*?Early subtree interval: .*?\((\d+) branches\)\s*'
         r'.*?Late subtree interval: .*?\((\d+) branches\)',
         log_content, re.DOTALL
@@ -174,11 +199,12 @@ if __name__ == "__main__":
     parser.add_argument('--verbose', action='store_true', help="Enable verbose logging for debugging parsing issues")
     params = parser.parse_args()
 
-    # Define the columns with additional FN analysis columns
+    # Define the columns with additional robust T calculation columns
     df = pd.DataFrame(
         columns=['model', 'tree/forest', 'id', 'BDSKY_evidence', 'evidence_binary',
                  'internal_u_stat', 'external_u_stat', 'internal_pval', 'external_pval',
-                 'T_value', 'T_percentage', 'num_tips', 'result', 'test_type', 'filepath',
+                 'T_value', 'T_percentage', 'T_top', 'T_bottom', 'T_fallback', 'dominant_criterion',
+                 'num_tips', 'result', 'test_type', 'filepath',
                  'early_branches', 'late_branches', 'interval_balance', 'short_interval_flag',
                  'extreme_T_flag', 'u_stat_closeness', 'pval_closeness', 'fn_explanation'])
 
@@ -220,7 +246,7 @@ if __name__ == "__main__":
                 # --- END CORRECTED MODEL DETERMINATION LOGIC ---
 
                 data_type = 'tree'  # This script processes individual tree logs
-                test_type = 'new_strategy'
+                test_type = 'robust_strategy'
 
                 # Initialize variables for the current log file
                 evidence_binary = 0
@@ -230,6 +256,10 @@ if __name__ == "__main__":
                 external_pval = float('nan')
                 T_value = float('nan')
                 T_percentage = float('nan')
+                T_top = float('nan')
+                T_bottom = float('nan')
+                T_fallback = float('nan')
+                dominant_criterion = 'N/A'
                 num_tips = 0
 
                 # Parse total tips
@@ -237,22 +267,47 @@ if __name__ == "__main__":
                 if tips_match:
                     num_tips = int(tips_match.group(1))
 
-                # Parse T value
-                t_match = re.search(r'Time \(T\) based on \d+ tips \(N/\d+\):\s*([\d.]+)', content)
-                if not t_match:  # Fallback to original regex if new format not found
+                # Parse T value - try new robust format first, then fallback to old format
+                t_match = re.search(r'Selected T:\s*([\d.]+)', content)
+                if not t_match:  # Fallback to old format
+                    t_match = re.search(r'Time \(T\) based on \d+ tips \(N/\d+\):\s*([\d.]+)', content)
+                if not t_match:  # Additional fallback
                     t_match = re.search(r'Time \(T\) based on \d+ tips:\s*([\d.]+)', content)
                 if t_match:
                     T_value = float(t_match.group(1))
 
-                # Parse T percentage
-                t_perc_match = re.search(r'Time \(T\) based on \d+ tips.*?:\s*[\d.]+\s*\(([\d.]+)% of tree height\)',
-                                         content)
+                # Parse T percentage - try new format first
+                t_perc_match = re.search(r'Selected T:\s*[\d.]+\s*\(([\d.]+)% of tree height\)', content)
+                if not t_perc_match:  # Fallback to old format
+                    t_perc_match = re.search(
+                        r'Time \(T\) based on \d+ tips.*?:\s*[\d.]+\s*\(([\d.]+)% of tree height\)', content)
                 if t_perc_match:
                     T_percentage = float(t_perc_match.group(1))
 
+                # Parse robust T calculation details
+                t_top_match = re.search(r'T_top \(tip accumulation\):\s*([\d.]+)', content)
+                if t_top_match:
+                    T_top = float(t_top_match.group(1))
+
+                t_bottom_match = re.search(r'T_bottom \(bottom structure\):\s*([\d.]+|N/A)', content)
+                if t_bottom_match and t_bottom_match.group(1) != 'N/A':
+                    try:
+                        T_bottom = float(t_bottom_match.group(1))
+                    except ValueError:
+                        T_bottom = float('nan')
+
+                t_fallback_match = re.search(r'T_fallback \(midpoint\):\s*([\d.]+)', content)
+                if t_fallback_match:
+                    T_fallback = float(t_fallback_match.group(1))
+
+                # Parse dominant criterion
+                dominant_match = re.search(r'Dominant criterion:\s*([^\n]+)', content)
+                if dominant_match:
+                    dominant_criterion = dominant_match.group(1).strip()
+
                 # Parse internal branches results
                 internal_section_match = re.search(
-                    r'Internal branches \(new strategy(?: comparison)?\):\s*'
+                    r'Internal branches \((?:new strategy|robust strategy)(?: comparison)?\):\s*'
                     r'.*?T used = ([\d.]+)\s*'
                     r'.*?Early subtree interval: .*?\n'
                     r'.*?Late subtree interval: .*?\n'
@@ -269,7 +324,7 @@ if __name__ == "__main__":
 
                 # Parse external branches results
                 external_section_match = re.search(
-                    r'External branches \(new strategy(?: comparison)?\):\s*'
+                    r'External branches \((?:new strategy|robust strategy)(?: comparison)?\):\s*'
                     r'.*?T used = ([\d.]+)\s*'
                     r'.*?Early subtree interval: .*?\n'
                     r'.*?Late subtree interval: .*?\n'
@@ -284,10 +339,12 @@ if __name__ == "__main__":
                     if "External branches: Not enough data for comparison." in content:
                         external_pval = 'N/A (Insufficient Data)'
 
-                # Determine overall evidence based on the new single summary line
-                evidence_detected_line = re.search(r'NEW SKY test: Evidence of BD-Skyline model detected', content)
+                # Determine overall evidence based on summary lines (both old and new formats)
+                evidence_detected_line = re.search(r'(?:NEW|ENHANCED) SKY test: Evidence of BD-Skyline model detected',
+                                                   content)
                 no_evidence_detected_line = re.search(
-                    r'NEW SKY test: No evidence of BD-Skyline model \(consistent with simple BD\)', content)
+                    r'(?:NEW|ENHANCED) SKY test: No evidence of BD-Skyline model \(consistent with simple BD\)',
+                    content)
 
                 if evidence_detected_line:
                     evidence_binary = 1
@@ -332,12 +389,14 @@ if __name__ == "__main__":
                 df.loc[f'{os.path.basename(log_path)}',  # Using filename as index
                 ['model', 'tree/forest', 'id', 'BDSKY_evidence', 'evidence_binary',
                  'internal_u_stat', 'external_u_stat', 'internal_pval', 'external_pval',
-                 'T_value', 'T_percentage', 'num_tips', 'result', 'test_type', 'filepath',
+                 'T_value', 'T_percentage', 'T_top', 'T_bottom', 'T_fallback', 'dominant_criterion',
+                 'num_tips', 'result', 'test_type', 'filepath',
                  'early_branches', 'late_branches', 'interval_balance', 'short_interval_flag',
                  'extreme_T_flag', 'u_stat_closeness', 'pval_closeness', 'fn_explanation']] = [
                     model, data_type, i, evidence_text, evidence_binary,
                     internal_u_stat, external_u_stat, internal_pval, external_pval,
-                    T_value, T_percentage, num_tips, result, test_type, log_path,
+                    T_value, T_percentage, T_top, T_bottom, T_fallback, dominant_criterion,
+                    num_tips, result, test_type, log_path,
                     fn_analysis['early_branch_count'], fn_analysis['late_branch_count'],
                     fn_analysis['interval_balance'], fn_analysis['short_interval_flag'],
                     fn_analysis['extreme_T_flag'], fn_analysis['u_stat_closeness'],
@@ -363,8 +422,8 @@ if __name__ == "__main__":
     # --- Global statistics ---
     # Ensure numeric columns are actually numeric before calculating statistics
     numeric_columns = ['evidence_binary', 'internal_u_stat', 'external_u_stat',
-                       'internal_pval', 'external_pval', 'T_value', 'T_percentage', 'num_tips',
-                       'early_branches', 'late_branches', 'interval_balance']
+                       'internal_pval', 'external_pval', 'T_value', 'T_percentage', 'T_top', 'T_bottom', 'T_fallback',
+                       'num_tips', 'early_branches', 'late_branches', 'interval_balance']
     for col in numeric_columns:
         # Only convert if the column might contain floats, otherwise leave 'N/A (Insufficient Data)' as string
         if col in ['internal_pval', 'external_pval']:
@@ -418,6 +477,22 @@ if __name__ == "__main__":
         print(
             f'\tExtreme T cases: {fn_cases["extreme_T_flag"].sum()} ({(fn_cases["extreme_T_flag"].sum() / len(fn_cases) * 100):.1f}%)')
 
+        # Robust T analysis
+        print(f'\nRobust T Analysis:')
+        # Count which criterion dominated
+        criterion_counts = fn_cases['dominant_criterion'].value_counts()
+        for criterion, count in criterion_counts.items():
+            percentage = (count / len(fn_cases)) * 100
+            print(f'\t{criterion}: {count} cases ({percentage:.1f}%)')
+
+        # Average T values
+        if not fn_cases['T_top'].isnull().all():
+            print(f'\tAverage T_top: {fn_cases["T_top"].mean():.3f}')
+        if not fn_cases['T_bottom'].isnull().all():
+            print(f'\tAverage T_bottom: {fn_cases["T_bottom"].mean():.3f}')
+        if not fn_cases['T_fallback'].isnull().all():
+            print(f'\tAverage T_fallback: {fn_cases["T_fallback"].mean():.3f}')
+
         # U statistic closeness distribution
         print(f'\nU statistic closeness distribution:')
         u_closeness_counts = fn_cases['u_stat_closeness'].value_counts()
@@ -448,6 +523,9 @@ if __name__ == "__main__":
                 mean_external_pval = ddf['external_pval'].mean()
                 mean_T = ddf['T_value'].mean()
                 mean_T_perc = ddf['T_percentage'].mean()
+                mean_T_top = ddf['T_top'].mean()
+                mean_T_bottom = ddf['T_bottom'].mean()
+                mean_T_fallback = ddf['T_fallback'].mean()
 
                 num_detected = len(ddf[ddf['evidence_binary'] == 1])
                 percentage_detected = 100 * num_detected / len(ddf) if len(ddf) > 0 else 0.0
@@ -483,6 +561,10 @@ if __name__ == "__main__":
                 print(f'\tavg external p-val\t{mean_external_pval:.6f}')
                 print(f'\tavg T\t{mean_T:.4f}')
                 print(f'\tavg T percentage\t{mean_T_perc:.1f}%')
+                print(f'\tavg T_top\t{mean_T_top:.4f}' if not pd.isna(mean_T_top) else '\tavg T_top\tNaN')
+                print(f'\tavg T_bottom\t{mean_T_bottom:.4f}' if not pd.isna(mean_T_bottom) else '\tavg T_bottom\tNaN')
+                print(f'\tavg T_fallback\t{mean_T_fallback:.4f}' if not pd.isna(
+                    mean_T_fallback) else '\tavg T_fallback\tNaN')
                 print(f'\tavg num tips\t{tips_mean:.0f}\t[{tips_min:.0f}-{tips_max:.0f}]' if not pd.isna(
                     tips_mean) else '\tavg num tips\tNaN')
 
@@ -514,6 +596,23 @@ if __name__ == "__main__":
                         t_perc_list = '\t'.join(
                             f'{float(_):.1f}%' if pd.notna(_) else 'nan' for _ in fn_subset['T_percentage'].to_list())
                         print(f'\tT percentages\t{t_perc_list}')
+
+                        # Robust T analysis
+                        t_top_list = '\t'.join(
+                            f'{float(_):.3f}' if pd.notna(_) else 'nan' for _ in fn_subset['T_top'].to_list())
+                        print(f'\tT_top values\t{t_top_list}')
+
+                        t_bottom_list = '\t'.join(
+                            f'{float(_):.3f}' if pd.notna(_) else 'nan' for _ in fn_subset['T_bottom'].to_list())
+                        print(f'\tT_bottom values\t{t_bottom_list}')
+
+                        t_fallback_list = '\t'.join(
+                            f'{float(_):.3f}' if pd.notna(_) else 'nan' for _ in fn_subset['T_fallback'].to_list())
+                        print(f'\tT_fallback values\t{t_fallback_list}')
+
+                        # Dominant criterion
+                        criterion_list = '\t'.join(str(_) for _ in fn_subset['dominant_criterion'].to_list())
+                        print(f'\tDominant criteria\t{criterion_list}')
 
                         # Interval balance analysis
                         balance_list = '\t'.join(
