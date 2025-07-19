@@ -56,13 +56,11 @@ def pick_cherries(tree, include_polytomies=True, cherry_type="tip"):
             continue
 
         if cherry_type == "tip":
-            # Traditional tip cherries (pairs of tips that diverged at same time)
             tips = [child for child in node.children if child.is_leaf()]
             if len(tips) >= 2:
                 yield ParentChildrenMotif(clustered_children=tips, root=node)
 
         elif cherry_type == "internal":
-            # Internal node cherries (pairs of internal nodes that diverged at same time)
             internal_nodes = [child for child in node.children if not child.is_leaf()]
             if len(internal_nodes) >= 2:
                 yield ParentChildrenMotif(clustered_children=internal_nodes, root=node)
@@ -84,13 +82,11 @@ def bdei_test(forest, cherry_strategy="both"):
     """
     annotate_forest_with_time(forest)
 
-    # Initialize arrays for different cherry types
     c_tips = np.array([], dtype=bool)
     c_inodes = np.array([], dtype=bool)
     n_tip_cherries = 0
     n_internal_cherries = 0
 
-    # Process tip cherries if needed
     if cherry_strategy in ["tips_only", "both"]:
         tip_cherries = []
         for tree in forest:
@@ -102,7 +98,6 @@ def bdei_test(forest, cherry_strategy="both"):
             random_diffs_tips, real_diffs_tips = get_real_vs_reshuffled_diffs(tip_cherries)
             c_tips = random_diffs_tips > real_diffs_tips
 
-    # Process internal cherries if needed
     if cherry_strategy in ["internal_only", "both"]:
         internal_cherries = []
         for tree in forest:
@@ -114,14 +109,13 @@ def bdei_test(forest, cherry_strategy="both"):
             random_diffs_internal, real_diffs_internal = get_real_vs_reshuffled_diffs(internal_cherries)
             c_inodes = random_diffs_internal > real_diffs_internal
 
-    # Combine arrays based on strategy
     if cherry_strategy == "tips_only":
         c_combined = c_tips
         n_total_cherries = n_tip_cherries
     elif cherry_strategy == "internal_only":
         c_combined = c_inodes
         n_total_cherries = n_internal_cherries
-    else:  # both
+    else:
         c_combined = np.concatenate([c_tips, c_inodes])
         n_total_cherries = n_tip_cherries + n_internal_cherries
 
@@ -131,7 +125,6 @@ def bdei_test(forest, cherry_strategy="both"):
     if len(c_combined) < 2:
         return 1, n_total_cherries
 
-    # Apply binomial test
     pval = scipy.stats.binomtest(c_combined.sum(), n=len(c_combined), p=0.5, alternative='less').pvalue
 
     return pval, n_total_cherries
@@ -152,53 +145,42 @@ def get_real_vs_reshuffled_diffs(all_couples):
     """
     n_motifs = len(all_couples)
 
-    # Get all children for each cherry (no random selection yet)
     all_children = []
     for couple in all_couples:
         children = list(couple.clustered_children)
         all_children.append(children)
 
-    # Arrays for all possible comparisons
     real_diffs = []
     random_diffs = []
 
     if n_motifs > 1:
-        # Process cherries in pairs
         for i in range(0, n_motifs - 1, 2):
             cherry1_children = all_children[i]
             cherry2_children = all_children[i + 1]
 
-            # Ensure we have at least 2 children in each cherry
             if len(cherry1_children) < 2 or len(cherry2_children) < 2:
                 continue
 
-            # Get exactly 2 children from each cherry
             c1_child1, c1_child2 = cherry1_children[0], cherry1_children[1]
             c2_child1, c2_child2 = cherry2_children[0], cherry2_children[1]
 
-            # Real differences (original pairings)
             real_diff_1 = abs(c1_child1.dist - c1_child2.dist)
             real_diff_2 = abs(c2_child1.dist - c2_child2.dist)
             real_diffs.extend([real_diff_1, real_diff_2])
 
-            # All possible swapped differences
-            swap_diff_1 = abs(c1_child1.dist - c2_child1.dist)  # child1 vs child1'
-            swap_diff_2 = abs(c1_child1.dist - c2_child2.dist)  # child1 vs child2'
-            swap_diff_3 = abs(c1_child2.dist - c2_child1.dist)  # child2 vs child1'
-            swap_diff_4 = abs(c1_child2.dist - c2_child2.dist)  # child2 vs child2'
+            swap_diff_1 = abs(c1_child1.dist - c2_child1.dist)
+            swap_diff_2 = abs(c1_child1.dist - c2_child2.dist)
+            swap_diff_3 = abs(c1_child2.dist - c2_child1.dist)
+            swap_diff_4 = abs(c1_child2.dist - c2_child2.dist)
 
-            # Average of all 4 swaps to get 2 comparison values (to match 2 real values)
             avg_swap_1 = (swap_diff_1 + swap_diff_2) / 2
             avg_swap_2 = (swap_diff_3 + swap_diff_4) / 2
 
             random_diffs.extend([avg_swap_1, avg_swap_2])
 
-        # Handle odd number of cherries (last 3 cherries)
         if n_motifs % 2 == 1 and n_motifs >= 3:
-            # Use last 3 cherries in a cycle
             last_3_children = all_children[-3:]
 
-            # Ensure all have at least 2 children
             if all(len(children) >= 2 for children in last_3_children):
                 c1_child1, c1_child2 = last_3_children[0][0], last_3_children[0][1]
                 c2_child1, c2_child2 = last_3_children[1][0], last_3_children[1][1]
@@ -226,99 +208,78 @@ def get_real_vs_reshuffled_diffs(all_couples):
     """
     n_motifs = len(all_couples)
 
-    # Get all children for each cherry
     all_children = []
     for couple in all_couples:
         children = list(couple.clustered_children)
         all_children.append(children)
 
-    # Arrays for all individual comparisons
     real_diffs = []
     random_diffs = []
 
     if n_motifs > 1:
-        # Process cherries in pairs
         for i in range(0, n_motifs - 1, 2):
             cherry1_children = all_children[i]
             cherry2_children = all_children[i + 1]
 
-            # Ensure we have at least 2 children in each cherry
             if len(cherry1_children) < 2 or len(cherry2_children) < 2:
                 continue
 
-            # Get exactly 2 children from each cherry
             c1_child1, c1_child2 = cherry1_children[0], cherry1_children[1]
             c2_child1, c2_child2 = cherry2_children[0], cherry2_children[1]
 
-            # Calculate the real differences (within-cherry)
-            real_diff_1 = abs(c1_child1.dist - c1_child2.dist)  # |tip1.1 - tip1.2|
-            real_diff_2 = abs(c2_child1.dist - c2_child2.dist)  # |tip2.1 - tip2.2|
+            real_diff_1 = abs(c1_child1.dist - c1_child2.dist)
+            real_diff_2 = abs(c2_child1.dist - c2_child2.dist)
 
-            # Calculate all possible cross-cherry differences
-            cross_diff_1 = abs(c1_child1.dist - c2_child1.dist)  # |tip1.1 - tip2.1|
-            cross_diff_2 = abs(c1_child1.dist - c2_child2.dist)  # |tip1.1 - tip2.2|
-            cross_diff_3 = abs(c1_child2.dist - c2_child1.dist)  # |tip1.2 - tip2.1|
-            cross_diff_4 = abs(c1_child2.dist - c2_child2.dist)  # |tip1.2 - tip2.2|
+            cross_diff_1 = abs(c1_child1.dist - c2_child1.dist)
+            cross_diff_2 = abs(c1_child1.dist - c2_child2.dist)
+            cross_diff_3 = abs(c1_child2.dist - c2_child1.dist)
+            cross_diff_4 = abs(c1_child2.dist - c2_child2.dist)
 
-            # Make 8 individual comparisons as specified:
-            # Comparisons 1-4: real_diff_1 against each cross difference
             real_diffs.extend([real_diff_1, real_diff_1, real_diff_1, real_diff_1])
             random_diffs.extend([cross_diff_1, cross_diff_2, cross_diff_3, cross_diff_4])
 
-            # Comparisons 5-8: real_diff_2 against each cross difference
             real_diffs.extend([real_diff_2, real_diff_2, real_diff_2, real_diff_2])
             random_diffs.extend([cross_diff_1, cross_diff_2, cross_diff_3, cross_diff_4])
 
-        # Handle odd number of cherries (last 3 cherries)
         if n_motifs % 2 == 1 and n_motifs >= 3:
-            # Use last 3 cherries in a cycle
             last_3_children = all_children[-3:]
 
-            # Ensure all have at least 2 children
             if all(len(children) >= 2 for children in last_3_children):
                 c1_child1, c1_child2 = last_3_children[0][0], last_3_children[0][1]
                 c2_child1, c2_child2 = last_3_children[1][0], last_3_children[1][1]
                 c3_child1, c3_child2 = last_3_children[2][0], last_3_children[2][1]
 
-                # Real differences (within-cherry)
                 real_diff_1 = abs(c1_child1.dist - c1_child2.dist)
                 real_diff_2 = abs(c2_child1.dist - c2_child2.dist)
                 real_diff_3 = abs(c3_child1.dist - c3_child2.dist)
 
-                # Cyclic cross-cherry comparisons
-                # Cherry 1 vs Cherry 2
                 cross_1_2a = abs(c1_child1.dist - c2_child1.dist)
                 cross_1_2b = abs(c1_child1.dist - c2_child2.dist)
                 cross_1_2c = abs(c1_child2.dist - c2_child1.dist)
                 cross_1_2d = abs(c1_child2.dist - c2_child2.dist)
 
-                # Cherry 2 vs Cherry 3
                 cross_2_3a = abs(c2_child1.dist - c3_child1.dist)
                 cross_2_3b = abs(c2_child1.dist - c3_child2.dist)
                 cross_2_3c = abs(c2_child2.dist - c3_child1.dist)
                 cross_2_3d = abs(c2_child2.dist - c3_child2.dist)
 
-                # Cherry 3 vs Cherry 1
                 cross_3_1a = abs(c3_child1.dist - c1_child1.dist)
                 cross_3_1b = abs(c3_child1.dist - c1_child2.dist)
                 cross_3_1c = abs(c3_child2.dist - c1_child1.dist)
                 cross_3_1d = abs(c3_child2.dist - c1_child2.dist)
 
-                # 8 comparisons for cherry 1 vs cherry 2
                 real_diffs.extend([real_diff_1] * 4)
                 random_diffs.extend([cross_1_2a, cross_1_2b, cross_1_2c, cross_1_2d])
 
                 real_diffs.extend([real_diff_2] * 4)
                 random_diffs.extend([cross_1_2a, cross_1_2b, cross_1_2c, cross_1_2d])
 
-                # 8 comparisons for cherry 2 vs cherry 3
                 real_diffs.extend([real_diff_2] * 4)
                 random_diffs.extend([cross_2_3a, cross_2_3b, cross_2_3c, cross_2_3d])
 
                 real_diffs.extend([real_diff_3] * 4)
                 random_diffs.extend([cross_2_3a, cross_2_3b, cross_2_3c, cross_2_3d])
 
-                # 8 comparisons for cherry 3 vs cherry 1
                 real_diffs.extend([real_diff_3] * 4)
                 random_diffs.extend([cross_3_1a, cross_3_1b, cross_3_1c, cross_3_1d])
 
@@ -326,12 +287,11 @@ def get_real_vs_reshuffled_diffs(all_couples):
                 random_diffs.extend([cross_3_1a, cross_3_1b, cross_3_1c, cross_3_1d])
 
     else:
-        # Single cherry case - no swapping possible
         if n_motifs == 1 and len(all_children[0]) >= 2:
             child1, child2 = all_children[0][0], all_children[0][1]
             real_diff = abs(child1.dist - child2.dist)
             real_diffs = [real_diff]
-            random_diffs = [real_diff]  # No swap possible
+            random_diffs = [real_diff]
 
     return np.array(random_diffs), np.array(real_diffs)
 
@@ -353,7 +313,6 @@ def cherry_diff_plot(forest, outfile=None):
 
     annotate_forest_with_time(forest)
 
-    # Get tip and internal cherries separately
     tip_cherries = []
     internal_cherries = []
     for tree in forest:
@@ -366,7 +325,6 @@ def cherry_diff_plot(forest, outfile=None):
 
     plt.figure(figsize=(12, 6))
 
-    # Plot tip cherries
     plt.subplot(1, 2, 1)
     if tip_cherries:
         x = np.array([getattr(_.root, TIME) for _ in tip_cherries])
@@ -383,7 +341,6 @@ def cherry_diff_plot(forest, outfile=None):
     plt.title(f'Tip Cherries (n={len(tip_cherries)})')
     plt.legend()
 
-    # Plot internal cherries
     plt.subplot(1, 2, 2)
     if internal_cherries:
         x = np.array([getattr(_.root, TIME) for _ in internal_cherries])

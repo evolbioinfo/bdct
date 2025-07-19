@@ -17,6 +17,8 @@ M = int(config.get('max', 1000))
 
 MODELS = ['BDCT0', 'BDEICT0']
 
+BASE_DIR = os.path.dirname(workflow.basedir)
+
 os.makedirs('logs', exist_ok=True)
 
 rule all:
@@ -34,12 +36,13 @@ rule bdei_test:
     params:
         mem=2000,
         name='bdei_{i}',
-        qos='fast'
+        qos='fast',
+        base_dir=BASE_DIR
     threads: 1
     singularity: "docker://evolbioinfo/bdct:v0.1.25"
     shell:
         """
-        python3 /home/alejandra/NEWSNAKE/bdct/bdei_distinguisher.py --nwk {input.nwk} --log {output.log} --strategy internal_only
+        python3 {params.base_dir}/bdct/bdei_distinguisher.py --nwk {input.nwk} --log {output.log} --strategy internal_only
         """
 
 rule combine_bdei:
@@ -59,5 +62,5 @@ rule combine_bdei:
     singularity: "docker://evolbioinfo/pastml:v1.9.43"
     shell:
         """
-        python3 py/summary_table_bdei.py --logs {input.log} --tab {output.tab}
+        python3 {workflow.basedir}/py/summary_table_bdei.py --logs {input.log} --tab {output.tab}
         """

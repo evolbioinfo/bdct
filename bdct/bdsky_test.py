@@ -6,10 +6,10 @@ from typing import List, Tuple, Optional
 import argparse
 import sys
 
-# Configure logging to display messages by default
+
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-# This is the minimum sample size for the Mann-Whitney U test, not for T calculation.
+
 DEFAULT_MANN_WHITNEY_MIN_SAMPLES = 20
 TIME = 'time'
 
@@ -20,10 +20,8 @@ def annotate_tree_with_time(tree):
 
     :param tree: ete3.Tree, the tree to annotate
     """
-    # Set root time to 0
     tree.add_features(time=0.0)
 
-    # Calculate times for all nodes
     for node in tree.traverse("preorder"):
         if not node.is_root():
             node.add_features(time=node.up.time + node.dist)
@@ -36,31 +34,30 @@ def remove_certain_leaves(tr: Tree, to_remove=lambda node: False) -> Optional[Tr
     :param to_remove: a method to check is a leaf should be removed.
     :return: ete3.Tree: the pruned tree, or None if the root is removed.
     """
-    # Create a list of tips to remove to avoid modifying list while iterating
+
     tips_to_remove = [tip for tip in tr.get_leaves() if to_remove(tip)]
 
     for node in tips_to_remove:
-        if node.is_root():  # If the root itself is a leaf and needs to be removed
-            return None  # The tree becomes empty
+        if node.is_root():
+            return None
 
         parent = node.up
         parent.remove_child(node)
 
-        # If the parent node has only one child now, merge them.
-        # This prevents creating spurious internal nodes with a single child, common in pruning.
-        if len(parent.children) == 1 and not parent.is_root():  # Don't merge if parent is the actual root
+
+        if len(parent.children) == 1 and not parent.is_root():
             child_to_merge = parent.children[0]
-            child_to_merge.dist += parent.dist  # Add parent's branch length to child's
+            child_to_merge.dist += parent.dist
 
             grandparent = parent.up
             if grandparent:
-                grandparent.remove_child(parent)  # Remove the parent
-                grandparent.add_child(child_to_merge)  # Attach the child to grandparent
-            else:  # If parent was the original root (and now has one child, which is new root)
+                grandparent.remove_child(parent)
+                grandparent.add_child(child_to_merge)
+            else:
                 child_to_merge.up = None
-                tr = child_to_merge  # This child becomes the new tree root
-        elif not parent.children and not parent.is_root():  # If parent becomes an empty internal node (lost all children)
-            pass  # No specific action needed here; parent will remain or be garbage collected if unreachable.
+                tr = child_to_merge
+        elif not parent.children and not parent.is_root():
+            pass
 
     return tr
 
@@ -83,11 +80,11 @@ def extract_branches_in_interval(tree, t_start, t_end):
         if node.is_root() or node.dist is None:
             continue
 
-        # Calculate branch start and end times
+
         branch_end_time = getattr(node, TIME)
         branch_start_time = branch_end_time - node.dist
 
-        # Check if branch falls completely within interval
+
         if branch_start_time >= t_start and branch_end_time <= t_end:
             if node.is_leaf():
                 external_branches.append(node.dist)
@@ -112,30 +109,28 @@ def find_largest_subtree_in_interval(tree, t_start, t_end):
 
     def subtree_falls_in_interval(node, t_start_check, t_end_check):
         """Check if entire subtree rooted at node falls within interval."""
-        # For a subtree, all its *nodes* and *their incoming branches*
-        # must be within the interval.
-        # Check the root of the potential subtree itself
+
         node_time = getattr(node, TIME)
         if node_time < t_start_check or node_time > t_end_check:
             return False
 
-        # Check the incoming branch to the root of this subtree
+
         if not node.is_root() and node.dist is not None:
             branch_start_time = getattr(node.up, TIME)
             if branch_start_time < t_start_check or node_time > t_end_check:
                 return False
 
-        # Check all descendants and their incoming branches
+
         for descendant in node.traverse():
-            if descendant == node:  # Skip the root of the current subtree
+            if descendant == node:
                 continue
 
             desc_time = getattr(descendant, TIME)
-            # This check is for the node's existence within the time boundaries
+
             if desc_time < t_start_check or desc_time > t_end_check:
                 return False
 
-            # Check the incoming branch to the descendant
+
             if descendant.dist is not None:
                 desc_branch_start_time = getattr(descendant.up, TIME)
                 if desc_branch_start_time < t_start_check or desc_time > t_end_check:
@@ -151,32 +146,29 @@ def find_largest_subtree_in_interval(tree, t_start, t_end):
         internal = []
         external = []
         for descendant in node.traverse():
-            if descendant == node:  # Skip the root of the subtree itself when considering its incoming branch
+            if descendant == node:
                 continue
-            if descendant.dist is not None:  # Ensure it has a valid branch length
+            if descendant.dist is not None:
                 if descendant.is_leaf():
                     external.append(descendant.dist)
                 else:
                     internal.append(descendant.dist)
         return internal, external
 
-    # Find all potential subtree roots
+
     max_nodes_in_subtree = -1
     best_root = None
 
     for node in tree.traverse():
-        # Only consider internal nodes whose incoming branch starts *after* t_start
-        # AND which have children (are not leaves).
-        if node.is_root() or node.is_leaf() or node.dist is None:  # Must be an internal node with incoming branch
+
+        if node.is_root() or node.is_leaf() or node.dist is None:
             continue
 
         branch_start_time = getattr(node.up, TIME)
         node_time = getattr(node, TIME)
 
-        # The root of the largest subtree should start its incoming branch AFTER t_start
-        # and the node itself (the root of the subtree) should be within the interval.
+
         if branch_start_time >= t_start and node_time <= t_end:
-            # Now check if the *entire* subtree falls within the interval
             if subtree_falls_in_interval(node, t_start, t_end):
                 current_nodes_in_subtree = count_nodes_in_subtree(node)
 
@@ -219,7 +211,7 @@ def find_time_for_n_tips(tree, n_tips_threshold):
         return None
 
     tip_times.sort()
-    # The time it takes to have n_tips_threshold tips is the time of the (n_tips_threshold-1)th tip (0-indexed)
+
     return tip_times[n_tips_threshold - 1]
 
 
@@ -244,7 +236,7 @@ def find_nodes_with_min_subtree_tips(tree, min_tips):
     qualifying_nodes = []
 
     for node in tree.traverse():
-        if not node.is_leaf():  # Only consider internal nodes
+        if not node.is_leaf():
             tips_in_subtree = count_tips_in_subtree(node)
             if tips_in_subtree >= min_tips:
                 qualifying_nodes.append(node)
@@ -277,16 +269,16 @@ def calculate_robust_T(tree, n_tips_fraction_denominator: int = 4):
         'n_tips_fraction_denominator': n_tips_fraction_denominator
     }
 
-    # Calculate T_top (current method)
+
     T_top = find_time_for_n_tips(tree, n_tips_for_calculation)
     calculation_details['T_top'] = T_top
 
-    # Calculate T_bottom
+
     T_bottom = None
     if n_tips_for_calculation > 0:
         qualifying_nodes = find_nodes_with_min_subtree_tips(tree, n_tips_for_calculation)
         if qualifying_nodes:
-            # Find the maximum time among qualifying nodes
+
             max_time_qualifying_node = max(getattr(node, TIME) for node in qualifying_nodes)
             T_bottom = tree_height - max_time_qualifying_node
             calculation_details['max_time_qualifying_node'] = max_time_qualifying_node
@@ -296,11 +288,11 @@ def calculate_robust_T(tree, n_tips_fraction_denominator: int = 4):
 
     calculation_details['T_bottom'] = T_bottom
 
-    # Calculate T_fallback (midpoint)
+
     T_fallback = tree_height / 2
     calculation_details['T_fallback'] = T_fallback
 
-    # Calculate robust T as max of all valid options
+
     valid_T_values = [T for T in [T_top, T_bottom, T_fallback] if T is not None and T > 0]
 
     if not valid_T_values:
@@ -310,7 +302,7 @@ def calculate_robust_T(tree, n_tips_fraction_denominator: int = 4):
     T_robust = max(valid_T_values)
     calculation_details['T_robust'] = T_robust
 
-    # Determine which criterion dominated
+
     if T_robust == T_top:
         calculation_details['dominant_criterion'] = 'T_top (tip accumulation)'
     elif T_robust == T_bottom:
@@ -350,10 +342,8 @@ def sky_test_new_strategy(tree, min_mann_whitney_samples=DEFAULT_MANN_WHITNEY_MI
     results = {}
     split_times = {}
 
-    # Step 1: Calculate robust T using the new method
     T, calculation_details = calculate_robust_T(tree, n_tips_fraction_denominator)
 
-    # Store calculation details in split_times
     split_times.update(calculation_details)
     split_times['T_from_robust_calculation'] = T
 
@@ -364,9 +354,8 @@ def sky_test_new_strategy(tree, min_mann_whitney_samples=DEFAULT_MANN_WHITNEY_MI
 
     logging.info(f"Determined robust T = {T:.4f} ({calculation_details['dominant_criterion']}).")
 
-    # Step 2: Study the largest subtree in the late interval [tree_height - T, tree_height]
     late_interval_start = tree_height - T
-    if late_interval_start < 0:  # Ensure interval doesn't start before time 0
+    if late_interval_start < 0:
         late_interval_start = 0
 
     logging.info(
@@ -374,35 +363,34 @@ def sky_test_new_strategy(tree, min_mann_whitney_samples=DEFAULT_MANN_WHITNEY_MI
     late_internal_branches, late_external_branches = find_largest_subtree_in_interval(tree, late_interval_start,
                                                                                       tree_height)
 
-    # Step 3: Prune the tree using remove_certain_leaves for early interval analysis
+
     logging.info(f"Pruning tree at time T={T:.4f} for early interval analysis using remove_certain_leaves.")
 
-    # Create a deep copy of the original tree for the early analysis
-    pruned_tree_for_early_analysis = tree.copy("deepcopy")
-    annotate_tree_with_time(pruned_tree_for_early_analysis)  # Ensure copy is annotated
 
-    # === CALLING YOUR CUSTOM remove_certain_leaves FUNCTION HERE ===
+    pruned_tree_for_early_analysis = tree.copy("deepcopy")
+    annotate_tree_with_time(pruned_tree_for_early_analysis)
+
+
     pruned_tree_for_early_analysis = remove_certain_leaves(pruned_tree_for_early_analysis,
                                                            lambda tip: getattr(tip, TIME) > T)
-    # === END OF CALL ===
 
-    if pruned_tree_for_early_analysis is None or not pruned_tree_for_early_analysis.get_leaves():  # Check if tree is empty after removal
+
+    if pruned_tree_for_early_analysis is None or not pruned_tree_for_early_analysis.get_leaves():
         logging.warning(
             f"Tree became empty after attempting to prune with remove_certain_leaves at time {T:.4f}. Cannot perform early interval analysis.")
         results['internal'] = results['external'] = None
-        return False, results, split_times  # Early exit if pruned tree is empty
+        return False, results, split_times
 
-    # Step 4: Study the largest subtree in the early interval [0, T] of the *pruned* tree
-    # For the tree where tips > T are removed, the "first interval" [0, T] is essentially the entire (modified) tree.
+
     logging.info(
         f"Analyzing early interval for largest subtree (root's incoming branch starts AFTER 0): [0, {T:.4f}] on MODIFIED tree.")
     early_internal_branches, early_external_branches = find_largest_subtree_in_interval(pruned_tree_for_early_analysis,
                                                                                         0, T)
 
-    # Step 5: Compare distributions
+
     alpha = 0.05
 
-    # Internal branches comparison
+
     if len(early_internal_branches) >= min_mann_whitney_samples and len(
             late_internal_branches) >= min_mann_whitney_samples:
         u_result_internal = scipy.stats.mannwhitneyu(early_internal_branches, late_internal_branches,
@@ -432,7 +420,7 @@ def sky_test_new_strategy(tree, min_mann_whitney_samples=DEFAULT_MANN_WHITNEY_MI
             f"Insufficient internal branches for comparison (early: {len(early_internal_branches)}, late: {len(late_internal_branches)}) (Needed: {min_mann_whitney_samples})")
         results['internal'] = None
 
-    # External branches comparison
+
     if len(early_external_branches) >= min_mann_whitney_samples and len(
             late_external_branches) >= min_mann_whitney_samples:
         u_result_external = scipy.stats.mannwhitneyu(early_external_branches, late_external_branches,
@@ -462,7 +450,7 @@ def sky_test_new_strategy(tree, min_mann_whitney_samples=DEFAULT_MANN_WHITNEY_MI
             f"Insufficient external branches for comparison (early: {len(early_external_branches)}, late: {len(late_external_branches)}) (Needed: {min_mann_whitney_samples})")
         results['external'] = None
 
-    # Determine if evidence of skyline model is found (uncorrected)
+
     evidence_found = False
     significant_tests = []
 
@@ -478,7 +466,7 @@ def sky_test_new_strategy(tree, min_mann_whitney_samples=DEFAULT_MANN_WHITNEY_MI
     if not any_test_run:
         logging.error(
             "No tests could be performed due to insufficient branch data for the chosen strategy. Cannot conclude SKY test.")
-        return False, None, split_times  # Early exit if no tests run
+        return False, None, split_times
 
     return evidence_found, results, split_times
 
@@ -500,31 +488,26 @@ def plot_early_vs_late_results(tree, results, outfile=None):
             "matplotlib and seaborn required for plotting. Please install them using 'pip install matplotlib seaborn'.")
         return
 
-    # Count valid results
     valid_results = [k for k, v in results.items() if v is not None]
     if not valid_results:
         logging.warning("No valid results to plot.")
         return
 
-    # Adjust figure size based on the number of valid results
     n_plots = len(valid_results)
     if n_plots == 0:
         logging.warning("No valid results to plot.")
         return
 
-    # Create subplots, either 1 or 2 columns based on n_plots
     fig, axes = plt.subplots(2, n_plots, figsize=(6 * n_plots, 8))
 
-    # If only one type of branch had valid results, axes might be 1D, reshape for consistent indexing
     if n_plots == 1:
-        axes = axes.reshape(2, 1) if n_plots > 0 else np.empty((2, 0))  # Handle empty case
+        axes = axes.reshape(2, 1) if n_plots > 0 else np.empty((2, 0))
 
     colors = ['skyblue', 'lightcoral']
 
     for i, branch_type in enumerate(valid_results):
         result = results[branch_type]
 
-        # Plot early interval
         if result['early_branches']:
             sns.histplot(result['early_branches'], bins=15, kde=True, alpha=0.7,
                          color=colors[0], edgecolor='black', ax=axes[0, i])
@@ -537,7 +520,6 @@ def plot_early_vs_late_results(tree, results, outfile=None):
         axes[0, i].set_xlabel('Branch Length')
         axes[0, i].set_ylabel('Frequency')
 
-        # Plot late interval
         if result['late_branches']:
             sns.histplot(result['late_branches'], bins=15, kde=True, alpha=0.7,
                          color=colors[1], edgecolor='black', ax=axes[1, i])
@@ -551,7 +533,6 @@ def plot_early_vs_late_results(tree, results, outfile=None):
         axes[1, i].set_xlabel('Branch Length')
         axes[1, i].set_ylabel('Frequency')
 
-        # Add Mann-Whitney U test results as text
         method_text = f'T method: {result.get("dominant_criterion", "unknown")}\n'
         axes[1, i].text(0.05, 0.95,
                         f'{method_text}U stat: {result["u_statistic"]:.4f}\np-value: {result["p_value"]:.6f}',
@@ -595,32 +576,28 @@ This ensures adequate power in both intervals and prevents extreme interval imba
 
     args = parser.parse_args()
 
-    # Set up logging level based on verbose argument
+
     level = logging.INFO if args.verbose else logging.WARNING
-    # Reconfigure basicConfig to allow changing level after initial import if needed
+
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
     logging.basicConfig(level=level, format='%(levelname)s: %(message)s')
 
     try:
-        # Read tree
+
         tree = Tree(args.nwk, format=1)
         total_tips = len(tree.get_leaves())
 
-        # Log total tips
         print(f"Total tips in tree: {total_tips}")
 
-        # --- Primary run with N/4 tips ---
         logging.info("Attempting BD-Skyline test with N/4 tips criterion using robust T selection...")
         evidence_found, results, split_times = sky_test_new_strategy(
             tree.copy("deepcopy"), args.min_mw_samples, n_tips_fraction_denominator=4
         )
 
-        # --- Rerun with N/2 tips if N/4 test failed (results is None) ---
         if results is None:
             logging.warning(
                 "N/4 tip analysis failed. Retrying BD-Skyline test with N/2 tips criterion using robust T selection...")
-            # Create a fresh copy of the original tree for the rerun to avoid any side effects from the previous run
             tree_for_rerun = Tree(args.nwk, format=1)
             evidence_found, results, split_times = sky_test_new_strategy(
                 tree_for_rerun, args.min_mw_samples, n_tips_fraction_denominator=2
@@ -630,16 +607,13 @@ This ensures adequate power in both intervals and prevents extreme interval imba
             else:
                 logging.error("N/2 tip analysis also failed. No results available.")
 
-        # Print split times prominently
         print("\n" + "=" * 50)
         print("ENHANCED BD-SKYLINE TEST RESULTS (ROBUST T)")
         print("=" * 50)
 
-        # Ensure tree_height is calculated if annotate_tree_with_time ran successfully
         tree_height = 0.0
-        # Re-annotate the original tree to ensure 'time' attribute is present for max calculation
         annotate_tree_with_time(tree)
-        if hasattr(tree.get_tree_root(), TIME):  # Check if root has time attribute after annotation
+        if hasattr(tree.get_tree_root(), TIME):
             tree_height = max(getattr(node, TIME) for node in tree.traverse() if hasattr(node, TIME))
 
         if 'T_from_robust_calculation' in split_times and split_times['T_from_robust_calculation'] is not None:
@@ -661,13 +635,11 @@ This ensures adequate power in both intervals and prevents extreme interval imba
         print(f"Tree height: {tree_height:.6f}")
         print("=" * 50)
 
-        # Results summary
         if evidence_found:
             print("\nENHANCED SKY test: Evidence of BD-Skyline model detected")
         else:
             print("\nENHANCED SKY test: No evidence of BD-Skyline model (consistent with simple BD)")
 
-        # Print detailed results
         if results is not None:
             for branch_type in ['internal', 'external']:
                 if results[branch_type] is not None:
@@ -686,14 +658,12 @@ This ensures adequate power in both intervals and prevents extreme interval imba
             print(
                 "\nNo detailed branch results available due to insufficient data or analysis errors from any attempt.")
 
-        # Generate plot if requested
         if args.plot:
             if results is not None:
                 plot_early_vs_late_results(tree, results, args.plot)
             else:
                 logging.warning("Skipping plot generation as no valid results were obtained from any test attempt.")
 
-        # Write log if requested
         if args.log:
             with open(args.log, 'w') as f:
                 f.write('Enhanced BD-Skyline test results - Robust T Selection\n')

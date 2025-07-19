@@ -11,9 +11,9 @@ folder = config.get("folder", '')
 num = int(config.get("num", 100))
 REPETITIONS = list(range(num))
 
-# Input paths
-BDSKY_PATH = "/home/alejandra/NEWSNAKE/simulations_bdsky/trees"
-BDCT_PATH = "/home/alejandra/NEWSNAKE/simulations/BDCT0"
+BASE_DIR = os.path.dirname(workflow.basedir)
+BDSKY_PATH = os.path.join(BASE_DIR, "simulations_bdsky/trees")
+BDCT_PATH = os.path.join(workflow.basedir, "BDCT0")
 
 os.makedirs('logs', exist_ok=True)
 
@@ -32,12 +32,13 @@ rule bdsky_test_bdsky_trees:
     params:
         mem=2000,
         name='bdsky_{i}',
-        qos='fast'
+        qos='fast',
+        base_dir=BASE_DIR
     threads: 1
     singularity: "docker://evolbioinfo/bdct:v0.1.25"
     shell:
         """
-        python3 /home/alejandra/NEWSNAKE/bdct/bdsky_test.py --nwk {input.nwk} --log {output.log}
+        python3 {params.base_dir}/bdct/bdsky_test.py --nwk {input.nwk} --log {output.log}
         """
 
 rule bdsky_test_bdct_trees:
@@ -51,12 +52,13 @@ rule bdsky_test_bdct_trees:
     params:
         mem=2000,
         name='bdct_{i}',
-        qos='fast'
+        qos='fast',
+        base_dir=BASE_DIR
     threads: 1
     singularity: "docker://evolbioinfo/bdct:v0.1.25"
     shell:
         """
-        python3 /home/alejandra/NEWSNAKE/bdct/bdsky_test.py --nwk {input.nwk} --log {output.log} 
+        python3 {params.base_dir}/bdct/bdsky_test.py --nwk {input.nwk} --log {output.log} 
         """
 rule combine_bdsky:
     '''
@@ -75,5 +77,5 @@ rule combine_bdsky:
     singularity: "docker://evolbioinfo/pastml:v1.9.43"
     shell:
         """
-        python3 /home/alejandra/NEWSNAKE/simulations/py/summary_table_bdsky.py --logs {input.bdsky_logs} {input.bdct_logs} --tab {output.tab}
+        python3 {workflow.basedir}/py/summary_table_bdsky.py --logs {input.bdsky_logs} {input.bdct_logs} --tab {output.tab}
         """
