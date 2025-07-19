@@ -1,0 +1,2 @@
+R,R_e,mu_ei,R_i,la_ie,psi_i,p_i,infectious time,incubation period,incubation fraction,contact tracing probability,pi_e,pi_i,pi_e-C,pi_i-C,removal time after notification,kappa,tips,hidden_trees,end_time
+1.81963,1,1.54811,2.67825,2.38703,0.891265,0.415858,1.122,0.645947,0.365365,0,0.511618,0.488382,0,0,1.122,0,919,0,12.0028

@@ -14,10 +14,8 @@ def find_closest_non_sibling_branch(target_branch, all_branches):
     :param all_branches: List of all branches in the forest
     :return: The closest non-sibling branch, or None if none exists
     """
-    # Get the start time of the target branch (when its parent node split)
     target_start_time = getattr(target_branch.up, TIME, 0.0) if target_branch.up else 0.0
 
-    # Filter out sibling branches (branches with the same parent) and the target itself
     non_sibling_branches = []
     for branch in all_branches:
         if branch != target_branch and branch.up != target_branch.up:
@@ -26,7 +24,6 @@ def find_closest_non_sibling_branch(target_branch, all_branches):
     if not non_sibling_branches:
         return None
 
-    # Find the closest by start time
     closest_branch = None
     min_time_diff = float('inf')
 
@@ -88,11 +85,10 @@ def bdss_test(forest):
     """
     annotate_forest_with_time(forest)
 
-    # Collect all internal branches (non-leaf, non-root nodes)
     all_branches = []
     for tree in forest:
         for node in tree.traverse():
-            if not node.is_leaf() and node.up:  # Internal branch with a parent
+            if not node.is_leaf() and node.up:
                 all_branches.append(node)
 
     n_branches = len(all_branches)
@@ -102,46 +98,36 @@ def bdss_test(forest):
         logging.warning("Not enough branches to perform BDSS test (need at least 3). Returning p-value of 1.")
         return 1.0, 0
 
-    # Count pairs where both child and parent are shorter than their non-sibling neighbors
     n_total_pairs = 0  # Total number of child-parent pairs where both are shorter
     n_triplets = 0  # Number of those pairs that extend to triplets (grandparent also shorter)
 
     for branch in all_branches:
-        # Check if this branch (child) is shorter than its non-sibling neighbor
         child_closest = find_closest_non_sibling_branch(branch, all_branches)
         if child_closest is None or branch.dist >= child_closest.dist:
             continue  # Child is not shorter, skip this lineage
 
-        # Check if the parent is also shorter than its non-sibling neighbor
         parent = branch.up
         if parent is None or parent.up is None:  # No parent or grandparent
             continue
 
         parent_closest = find_closest_non_sibling_branch(parent, all_branches)
         if parent_closest is None or parent.dist >= parent_closest.dist:
-            continue  # Parent is not shorter, skip this lineage
+            continue
 
-        # We have a valid pair: both child and parent are shorter than neighbors
         n_total_pairs += 1
 
-        # Check if this extends to a triplet (grandparent also shorter)
         grandparent = parent.up
-        if grandparent is None or grandparent.up is None:  # No grandparent or great-grandparent
+        if grandparent is None or grandparent.up is None:
             continue
 
         grandparent_closest = find_closest_non_sibling_branch(grandparent, all_branches)
         if grandparent_closest is not None and grandparent.dist < grandparent_closest.dist:
-            # Grandparent is also shorter - we have a triplet!
             n_triplets += 1
 
     if n_total_pairs == 0:
         logging.warning(
             "No valid child-parent pairs found where both are shorter than neighbors. Returning p-value of 1.")
         return 1.0, 0
-
-    # Binomial test: given a pair, what's the probability it extends to a triplet?
-    # Under BD model: probability = 0.5
-    # Under BDSS model: probability > 0.5 (superspreader lineages extend further)
     pval = scipy.stats.binomtest(
         n_triplets,
         n=n_total_pairs,
@@ -188,5 +174,5 @@ Strategy:
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)  # Configure logging to show info messages
+    logging.basicConfig(level=logging.INFO)
     main()

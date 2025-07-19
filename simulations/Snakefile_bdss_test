@@ -16,7 +16,7 @@ REPETITIONS = list(range(num))
 M = int(config.get('max', 1000))
 
 # Models for superspreading detection - only testing with control models (no superspreading/contact tracing)
-MODELS = ['BDCT', 'BDSSCT']
+MODELS = ['BDCT', 'BDEICT']
 
 os.makedirs('logs', exist_ok=True)
 
@@ -40,7 +40,7 @@ rule bdss_test:
     singularity: "docker://evolbioinfo/bdct:v0.1.25"
     shell:
         """
-        python3 /home/alejandra/NEWSNAKE/bdct/bdss_test.py --nwk {input.nwk} --log {output.log}
+        python3 ~/NEWSNAKE/bdct/bdss_test.py --nwk {input.nwk} --log {output.log}
         """
 
 rule combine_ss:
@@ -60,5 +60,5 @@ rule combine_ss:
     singularity: "docker://evolbioinfo/pastml:v1.9.43"
     shell:
         """
-        python3 /home/alejandra/NEWSNAKE/simulations/py/summary_table_bdss.py --logs {input.log} --tab {output.tab}
+        python3 ~/NEWSNAKE/simulations/py/summary_table_bdss.py --logs {input.log} --tab {output.tab}
         """

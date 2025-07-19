@@ -16,7 +16,6 @@ if __name__ == "__main__":
         i = int(re.findall(r'[0-9]+', log)[-1])
         pval, num_cherries = pd.read_csv(log, sep='\t', header=0).iloc[0, :]
 
-        # Extract model info for BDEI test
         if 'BDCT0' in log:
             model, kappa = 'BDCT', '0'
         elif 'BDEICT0' in log:
@@ -25,14 +24,13 @@ if __name__ == "__main__":
             print(f"Warning: Could not extract model from {log}")
             continue
 
-        data_type = 'tree'  # Assuming tree data based on your structure
+        data_type = 'tree'
         df.loc[f'{model}({kappa}).{data_type}.{i}', ['model', 'tree/forest', 'id', 'num_cherries', 'BDEI_test']] \
             = [f'{model}({kappa})', data_type, i, num_cherries, pval]
 
-        # Try to read additional parameters if available
         try:
             param_log = log.replace('.bdei_test', '.log')
-            if re.search(r'BDEICT0', log):  # Has epidemiological intervention
+            if re.search(r'BDEICT0', log):
                 param_df = pd.read_csv(param_log, header=0)
                 rho = param_df.loc[0, 'sampling probability']
                 upsilon = param_df.loc[0, 'notification probability']
@@ -43,7 +41,7 @@ if __name__ == "__main__":
                                                              'rho', 'tips_in_cherries', 'num_tips', 'result']] \
                     = [psit / phit, upsilon * rho, upsilon, rho, num_cherries * 2 / tips, tips,
                        'TP' if pval < 0.05 else 'FN']
-            else:  # BDCT0 - no epidemiological intervention
+            else:
                 param_df = pd.read_csv(param_log, header=0)
                 rho = param_df.loc[0, 'sampling probability']
                 tips = param_df.loc[0, 'tips']
@@ -51,7 +49,6 @@ if __name__ == "__main__":
                                                              'rho', 'tips_in_cherries', 'num_tips', 'result']] \
                     = [1, 0, 0, rho, num_cherries * 2 / tips, tips, 'TN' if pval >= 0.05 else 'FP']
         except:
-            # If parameter files don't exist, set basic values
             df.loc[f'{model}({kappa}).{data_type}.{i}', ['infectious_vs_notified_time', 'upsilon_rho', 'upsilon', 'rho',
                                                          'tips_in_cherries', 'num_tips', 'result']] \
                 = [1, 0, 0, 1, 0, 0, 'TP' if 'BDEICT' in model and pval < 0.05 else (

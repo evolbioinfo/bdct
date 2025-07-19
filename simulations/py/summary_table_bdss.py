@@ -18,8 +18,8 @@ if __name__ == "__main__":
         pval, num_triplets = pd.read_csv(log, sep='\t', header=0).iloc[0, :]
 
         # Extract model information - looking for patterns like BDCT0, BDSSCT0
-        if 'BDSSCT0' in log:
-            model = 'BDSSCT'
+        if 'BDEICT0' in log:
+            model = 'BDEICT'
             kappa = '0'
             has_superspreading = True  # BDSSCT models have superspreading
         elif 'BDCT0' in log:
@@ -28,10 +28,10 @@ if __name__ == "__main__":
             has_superspreading = False  # BDCT models don't have superspreading
         else:
             # Fallback parsing
-            model_match = re.findall(r'(BDSSCT|BDCT)(\d+)', log)
+            model_match = re.findall(r'(BDEICT|BDCT)(\d+)', log)
             if model_match:
                 model, kappa = model_match[0]
-                has_superspreading = (model == 'BDSSCT')
+                has_superspreading = (model == 'BDEICT')
             else:
                 model = 'BDCT'
                 kappa = '0'

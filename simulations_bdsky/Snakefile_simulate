@@ -143,5 +143,14 @@ rule generate_final_tree:
                 --la $la1 $la2 --psi $psi1 $psi2 --p $p1 $p2 \
                 --skyline_times $change_time \
                 --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
+
+            # Check if skyline occurred by counting non-header lines in log
+            if [ -f {output.log} ]; then
+                num_lines=`tail -n +2 {output.log} | wc -l`
+                if [ $num_lines -lt 2 ]; then
+                    echo "Skyline did not occur (only $num_lines model period), restarting..."
+                    rm -f {output.nwk} {output.log}
+                fi
+            fi
         done
         """
