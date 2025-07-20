@@ -12,8 +12,6 @@ snakemake_settings = "  --keep-going --cores 1 --jobs 500 --rerun-incomplete --c
 
 localrules: all
 
-
-
 folder = config.get("folder", '')
 num = int(config.get("num", 100))
 REPETITIONS = list(range(num))
