@@ -3,7 +3,6 @@ import pandas as pd
 
 if __name__ == "__main__":
     import argparse
-
     parser = argparse.ArgumentParser(description="Summarize BDEI tests.")
     parser.add_argument('--logs', nargs='+', type=str, help="BDEI test results")
     parser.add_argument('--tab', type=str, help="summary table")

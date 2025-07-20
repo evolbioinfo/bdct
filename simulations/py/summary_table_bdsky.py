@@ -6,7 +6,6 @@ import numpy as np
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-
 def analyze_fn_case(log_content, T_value, num_tips):
     """
     Analyze FN cases to understand why skyline was not detected.

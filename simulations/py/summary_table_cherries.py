@@ -4,7 +4,6 @@ import pandas as pd
 
 if __name__ == "__main__":
     import argparse
-
     parser = argparse.ArgumentParser(description="Summarize cherry tests.")
     parser.add_argument('--logs', nargs='+', type=str, help="cherry test results")
     parser.add_argument('--tab', type=str, help="summary table")

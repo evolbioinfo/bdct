@@ -13,7 +13,6 @@ RANDOM_REPETITIONS = 1e3
 
 DEFAULT_PERCENTILE = 0.25
 
-
 class ParentChildrenMotif(object):
 
     def __init__(self, clustered_children, root=None):

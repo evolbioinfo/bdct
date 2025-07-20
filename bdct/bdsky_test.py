@@ -13,7 +13,6 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 DEFAULT_MANN_WHITNEY_MIN_SAMPLES = 20
 TIME = 'time'
 
-
 def annotate_tree_with_time(tree):
     """
     Annotates tree nodes with their time from the root.
