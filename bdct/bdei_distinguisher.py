@@ -65,7 +65,6 @@ def pick_cherries(tree, include_polytomies=True, cherry_type="tip"):
             if len(internal_nodes) >= 2:
                 yield ParentChildrenMotif(clustered_children=internal_nodes, root=node)
 
-
 def bdei_test(forest, cherry_strategy="both"):
     """
     Tests if the input forest was generated under a -BDEI model.

@@ -9,7 +9,6 @@ import os
 snakemake_settings = "  --keep-going --cores 1 --jobs 500 --rerun-incomplete --cluster  \"sbatch -c {threads} -o {folder}/logs/{params.name}.log -e {folder}/logs/{params.name}.log --mem {params.mem} -p common --qos={params.qos}  -A bioevo -J {params.name}\"  --use-singularity --singularity-prefix \"$HOME/.singularity\" --singularity-args \"-B /pasteur\" "
 
 localrules: all
-
 folder = config.get("folder", '')
 num = int(config.get("num", 100))
 REPETITIONS = list(range(num))

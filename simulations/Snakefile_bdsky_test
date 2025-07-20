@@ -6,7 +6,6 @@ import os
 # snakemake --snakefile Snakefile_bdsky_test --config folder=results_bdsky num=100 --keep-going --cores 1 --cluster "sbatch ..."
 
 localrules: all
-
 folder = config.get("folder", '')
 num = int(config.get("num", 100))
 REPETITIONS = list(range(num))
