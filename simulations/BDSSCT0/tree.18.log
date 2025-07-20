@@ -1,0 +1,2 @@
+R,R_i,la_ii,la_is,psi_i,p_i,R_s,la_si,la_ss,psi_s,p_s,infectious time,superspreading transmission ratio,superspreading fraction,contact tracing probability,pi_i,pi_s,pi_i-C,pi_s-C,removal time after notification,kappa,tips,hidden_trees,end_time
+1.04262,0.0524942,0.0016352,0.00103209,0.050811,0.284644,2.61133,0.081343,0.0513412,0.050811,0.284644,19.6808,49.7451,0.386943,0,0.613057,0.386943,0,0,19.6808,0,882,0,734.646
