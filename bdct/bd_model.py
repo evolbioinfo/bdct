@@ -146,7 +146,7 @@ def infer(forest, T, la=None, psi=None, p=None,
 
 
     print(f'Lower bounds are set to:\t{format_parameters(*lower_bounds, epi=False)}')
-    print(f'Upper bounds are set to:\t{format_parameters(*upper_bounds, epi=False)}\n')
+    print(f'Upper bounds are set to:\t{format_parameters(*upper_bounds, epi=False)}')
     print(f'Starting BD parameters:\t{format_parameters(*start_parameters, fixed=input_params)}\tloglikelihood={best_lk}')
     vs, lk = optimize_likelihood_params(forest, T=T, input_parameters=input_params,
                                         loglikelihood_function=loglikelihood, bounds=bounds,
