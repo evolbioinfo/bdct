@@ -4,7 +4,7 @@ from collections import defaultdict
 import numpy as np
 import scipy
 
-from bdct.tree_manager import TIME, read_forest, annotate_forest_with_time
+from bdct.tree_manager import TIME, read_forest, annotate_forest_with_time, annotate_tree_with_time
 
 DEFAULT_CHERRY_BLOCK_SIZE = 100
 
@@ -281,6 +281,7 @@ def bdss_test(forest):
 
     return pval
 
+
 def prune(tr, to_remove=lambda tip: False):
     """
     Removes all the branches leading to tips identified positively by to_remove function.
@@ -308,7 +309,7 @@ def prune(tr, to_remove=lambda tip: False):
                 grandparent.add_child(brother)
     return tr
 
-def sky_test(forest):
+def sky_test(tree):
     """
     Tests if the input forest was generated under a Skyline model.
 
@@ -316,44 +317,48 @@ def sky_test(forest):
     :param forest: list of trees
     :return: pval
     """
-    annotate_forest_with_time(forest)
-    n_tips = sum(len(tree) for tree in forest)
-    tip_times = sorted(getattr(_, TIME) for tree in forest for _ in tree)
+    annotate_tree_with_time(tree, start_time=-tree.dist)
+    n_tips = len(tree)
+    tip_times = sorted(getattr(_, TIME) for _ in tree)
     T = tip_times[-1]
 
-    n2time = defaultdict(lambda: 0)
+    n2time = defaultdict(lambda: (T, None))
 
-
-    for tree in forest:
-        for n in tree.traverse():
-            size = len(n)
-            time = getattr(n, TIME)
-            if time > n2time[size]:
-                n2time[size] = time
+    for n in tree.traverse():
+        size = len(n)
+        time = T - getattr(n, TIME)
+        cur_time, cur_n = n2time[size]
+        if time < cur_time:
+            n2time[size] = time, n
 
     for n in range(n_tips - 1, 0, -1):
-        n2time[n] = max(n2time[n + 1], n2time[n])
+        if n2time[n + 1][0] < n2time[n][0]:
+            n2time[n] = n2time[n + 1]
 
-    best_n = None
-    best_diff = np.inf
-    for n in range(20, n_tips // 2):
-        t_top = tip_times[n]
-        t_bottom = T - n2time[n]
-        if np.abs(t_top - t_bottom) < best_diff:
-            best_diff = np.abs(t_top - t_bottom)
-            best_n = n
+    min_samples = max(n_tips // 5, 12)
+    threshold_time = max(tip_times[min_samples], n2time[min_samples][0], T / 2)
 
 
-    threshold_time = max(tip_times[best_n], T - n2time[best_n])
-
-    bottom_trees = []
-    todo = list(forest)
-    while todo:
-        n = todo.pop()
-        if getattr(n, TIME) < (T - threshold_time):
-            todo.extend(n.children)
-        elif len(n) >= 20:
-            bottom_trees.append(n)
+    # best_n = None
+    # best_diff = np.inf
+    # for n in range(20, n_tips // 2):
+    #     t_top = tip_times[n]
+    #     t_bottom = T - n2time[n]
+    #     if np.abs(t_top - t_bottom) < best_diff:
+    #         best_diff = np.abs(t_top - t_bottom)
+    #         best_n = n
+    #
+    #
+    # threshold_time = max(tip_times[best_n], T - n2time[best_n])
+    #
+    # bottom_trees = []
+    # todo = [tree]
+    # while todo:
+    #     n = todo.pop()
+    #     if getattr(n, TIME) < (T - threshold_time):
+    #         todo.extend(n.children)
+    #     elif len(n) >= 20:
+    #         bottom_trees.append(n)
 
     def get_branch_len(tree):
         ids, eds = [], []
@@ -363,12 +368,12 @@ def sky_test(forest):
             (eds if n.is_leaf() else ids).append(n.dist)
         return ids, eds
 
-    bottom_tree = min(bottom_trees, key=lambda _: np.abs(len(_) - best_n))
-    bottom_tree_len = sorted([len(_) for _ in bottom_trees])
+    top_size = next(i for i in range(min_samples, n_tips) if threshold_time < tip_times[i + 1])
+    # bottom_tree = min(bottom_trees, key=lambda t: np.abs(len(t) - top_size))
+    bottom_tree = next(n2time[n][1] for n in range(min_samples, n_tips) if threshold_time < n2time[n + 1][0])
     ids_bottom, eds_bottom = get_branch_len(bottom_tree)
 
-    top_trees = [prune(t, lambda tip: getattr(tip, TIME) > threshold_time) for t in forest]
-    top_tree = max(top_trees, key=lambda _: len(_))
+    top_tree = prune(tree, lambda tip: getattr(tip, TIME) > threshold_time)
     ids_top, eds_top = get_branch_len(top_tree)
 
 
@@ -454,8 +459,8 @@ The test therefore reports a probability of partner notification being present i
     parser.add_argument('--nwk', default='/home/azhukova/projects/bdct/simulations/BDSSCT0/tree.3.nwk', type=str, help="input forest file in newick or nexus format")
     params = parser.parse_args()
 
-    forest = read_forest(f'/home/azhukova/projects/bdct/simulations_bdsky/trees/tree.0.nwk')
-    sky_test(forest)
+    forest = read_forest(f'/home/azhukova/projects/bdct/simulations_bdsky/trees/tree.18.nwk')
+    sky_test(forest[0])
 
 
     pvals_bdss = np.zeros(100, dtype=float)
@@ -464,7 +469,7 @@ The test therefore reports a probability of partner notification being present i
     pvals_sky_i = np.zeros(100, dtype=float)
     pvals_sky_e = np.zeros(100, dtype=float)
 
-    result_table = np.zeros((10, 9), dtype=int)
+    result_table = np.zeros((8, 9), dtype=int)
 
     models = ('BD', 'BDEI', 'BDSS', 'BDEISS', 'BDCT', 'BDEICT', 'BDSSCT', 'BDEISSCT', 'BDSKY')
     for mi, model in enumerate(models):
@@ -479,7 +484,7 @@ The test therefore reports a probability of partner notification being present i
             pvals_bdss[i] = bdss_test(forest)
             pvals_bdei[i] = bdei_test(forest)[0]
             pvals_ct[i] = ct_test(forest)[0]
-            pvals_sky_i[i], pvals_sky_e[i] = sky_test(forest)
+            pvals_sky_i[i], pvals_sky_e[i] = sky_test(forest[0])
 
         # for label, pvals in (('CT test', pvals_ct), ('BDEI test', pvals_bdei),
         #                      ('BDSS test', pvals_bdss),
@@ -488,27 +493,26 @@ The test therefore reports a probability of partner notification being present i
         #                      ):
         #     print(f"{label}:\t{sum(pvals < 0.05)} {pvals.min()} {pvals.mean()} {np.median(pvals)}")
 
-        result_table[:, mi] = [(pvals_bdei < 0.05).sum(), (pvals_bdss < 0.05).sum(), (pvals_ct < 0.05).sum(), \
-                              ((pvals_bdei < 0.05) & (pvals_bdss < 0.05)).sum(), \
-                              ((pvals_bdei < 0.05) & (pvals_ct < 0.05)).sum(), \
-                              ((pvals_bdss < 0.05) & (pvals_ct < 0.05)).sum(), \
-                              ((pvals_bdei < 0.05) & (pvals_ct < 0.05) & (pvals_bdss < 0.05)).sum(), \
-                               (pvals_sky_i < 0.05).sum(), (pvals_sky_e < 0.05).sum() ,\
-                              ((pvals_sky_i < 0.05) | (pvals_sky_e < 0.05)).sum() \
+        result_table[:, mi] = [(pvals_bdei < 0.05).sum(),
+                               (pvals_bdss < 0.05).sum(),
+                               ((pvals_bdei < 0.05) & (pvals_bdss < 0.05)).sum(),
+                               (pvals_ct < 0.05).sum(),
+                               ((pvals_bdei < 0.05) & (pvals_ct < 0.05)).sum(),
+                               ((pvals_bdss < 0.05) & (pvals_ct < 0.05)).sum(),
+                               ((pvals_bdei < 0.05) & (pvals_ct < 0.05) & (pvals_bdss < 0.05)).sum(),
+                               ((pvals_sky_i < 0.05) | (pvals_sky_e < 0.05)).sum()
                                ]
 
         # print('-----------------------------------------------\n')
     print('\t' + '\t'.join(models))
     print('EI\t', '\t'.join([f"{x:d}" for x in result_table[0, :]]))
     print('SS\t', '\t'.join([f"{x:d}" for x in result_table[1, :]]))
-    print('CT\t', '\t'.join([f"{x:d}" for x in result_table[2, :]]))
-    print('EISS\t', '\t'.join([f"{x:d}" for x in result_table[3, :]]))
+    print('EISS\t', '\t'.join([f"{x:d}" for x in result_table[2, :]]))
+    print('CT\t', '\t'.join([f"{x:d}" for x in result_table[3, :]]))
     print('EICT\t', '\t'.join([f"{x:d}" for x in result_table[4, :]]))
     print('SSCT\t', '\t'.join([f"{x:d}" for x in result_table[5, :]]))
     print('EISSCT\t', '\t'.join([f"{x:d}" for x in result_table[6, :]]))
-    print('SKY_i\t', '\t'.join([f"{x:d}" for x in result_table[7, :]]))
-    print('SKY_e\t', '\t'.join([f"{x:d}" for x in result_table[8, :]]))
-    print('SKY\t', '\t'.join([f"{x:d}" for x in result_table[8, :]]))
+    print('SKY\t', '\t'.join([f"{x:d}" for x in result_table[7, :]]))
 
 
 if __name__ == '__main__':
