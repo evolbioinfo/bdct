@@ -16,7 +16,7 @@ INTERVAL = 'interval'
 
 
 def loglikelihood(forest, *params, T, threads=1, u=-1):
-    n_intervals = len(params) // 3
+    n_intervals = (len(params) + 1) // 4 # 3 parameters per interval + n_intervals - 1 skyline times
 
     la_array = params[0:n_intervals * 3:3]
     psi_array = params[1:n_intervals * 3:3]
@@ -231,6 +231,7 @@ def infer(forest, T, la=None, psi=None, p=None, skyline_times=None,
         p_i = p[start] if n_p else None
         input_params[start * 3: start * 3 + 3] = np.array([la_i, psi_i, p_i])
         if n_intervals > 1:
+            print(f'\nLooking for starting parameters for interval {start} with the BD estimator...')
             vs, _ = bd_model.infer(forest, T=T, la=la_i, psi=psi_i, p=p_i,
                                    lower_bounds=bounds[start * 3: start * 3 + 3, 0],
                                    upper_bounds=bounds[start * 3: start * 3 + 3, 1], ci=False,
@@ -247,8 +248,9 @@ def infer(forest, T, la=None, psi=None, p=None, skyline_times=None,
 
     best_vs, best_lk = np.array(start_parameters), loglikelihood(forest, *start_parameters, T=T, threads=threads)
 
+    print('\nBDSKY parameter optimization...')
     print(f'Lower bounds are set to:\t{format_parameters(*lower_bounds, epi=False, T=T)}')
-    print(f'Upper bounds are set to:\t{format_parameters(*upper_bounds, epi=False, T=T)}\n')
+    print(f'Upper bounds are set to:\t{format_parameters(*upper_bounds, epi=False, T=T)}')
     print(f'Starting parameters:\t{format_parameters(*start_parameters, fixed=input_params, T=T)}\tloglikelihood={best_lk}')
 
 
@@ -323,7 +325,7 @@ def optimize_current_setting(bounds, n_intervals, start_parameters, input_params
 
 
 def save_results(vs, cis, T, log, ci=False):
-    n_intervals = len(vs) // 3
+    n_intervals = (len(vs) + 1) // 4 # 3 parameters per interval + n_intervals - 1 skyline times
 
     la_array = vs[0:n_intervals * 3:3]
     psi_array = vs[1:n_intervals * 3:3]
@@ -371,7 +373,7 @@ def save_results(vs, cis, T, log, ci=False):
 
 
 def format_parameters(*params, T, fixed=None, epi=True):
-    n_intervals = len(params) // 3
+    n_intervals = (len(params) + 1) // 4 # 3 parameters per interval + n_intervals - 1 skyline times
 
     la_array = params[0:n_intervals * 3:3]
     psi_array = params[1:n_intervals * 3:3]
