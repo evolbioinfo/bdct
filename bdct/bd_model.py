@@ -138,8 +138,20 @@ def infer(forest, T, la=None, psi=None, p=None,
     if upper_bounds[-1] > 1:
         raise ValueError('Probability bounds must be between 0 and 1')
 
+    if p is not None and (p <= 0 or p > 1):
+        raise ValueError('Sampling probability must be between 0 and 1, '
+                         'and greater than 0 (otherwise sampling is impossible).')
+
     bounds[:, 0] = lower_bounds
     bounds[:, 1] = upper_bounds
+
+    if la is not None:
+        bounds[0, :] = [la, la]
+    if psi is not None:
+        bounds[1, :] = [psi, psi]
+    if p is not None:
+        bounds[2, :] = [p, p]
+
     start_parameters = get_start_parameters(forest, la, psi, p)
     input_params = np.array([la, psi, p])
     best_vs, best_lk = np.array(start_parameters), loglikelihood(forest, *start_parameters, T, threads)

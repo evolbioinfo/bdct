@@ -1,6 +1,6 @@
 # bdct
 
-Maximum likelihood estimator of BD and BD-CT(1) model parameters from phylogenetic trees and a non-parametric CT detection test. 
+Maximum likelihood estimator of BD, BD-CT(1) and BDSKY model parameters from phylogenetic trees and a non-parametric CT detection test. 
 
 ## Article
 
@@ -12,19 +12,36 @@ Anna Zhukova, Olivier Gascuel (2025) Accounting for contact tracing in epidemiol
 [![PyPI downloads](https://shields.io/pypi/dm/bdct)](https://pypi.org/project/bdct/)
 [![Docker pulls](https://img.shields.io/docker/pulls/evolbioinfo/bdct)](https://hub.docker.com/r/evolbioinfo/bdct/tags)
 
-## BD-CT(1) model
 
-BD-CT(1) model extends the classical birth-death (BD) model with incomplete sampling [[Stadler 2009]](https://pubmed.ncbi.nlm.nih.gov/19631666/), by adding contact tracing (CT).
+## BD model
+
+The birth-death (BD) model with incomplete sampling was introduced by Stadler [[J Theor Biol 2009]](https://doi.org/10.1016/j.jtbi.2009.07.018).
 Under this model, infected individuals can transmit their pathogen with a constant rate λ, 
 get removed (become non-infectious) with a constant rate ψ, 
 and their pathogen can be sampled upon removal 
-with a constant probability ρ. On top of that, in the BD-CT(1) model, 
-at the moment of sampling the sampled individual 
+with a constant probability ρ. 
+
+The BD model therefore has 3 parameters:
+* λ -- transmission rate
+* ψ -- removal rate
+* ρ -- sampling probability upon removal. 
+
+These parameters can be expressed in terms of the following epidemiological parameters:
+* R<sub>0</sub>=λ/ψ -- reproduction number
+* 1/ψ -- infectious time.
+
+For identifiability, the BD model requires one of its parameters (λ, ψ, ρ) to be fixed.
+
+
+## BD-CT(1) model
+
+The BD-CT(1) model extends the classical BD model (see above) by adding contact tracing (CT): 
+At the moment of sampling the sampled individual 
 might notify their most recent contact with a constant probability υ. 
 Upon notification, the contact is removed almost instantaneously and their pathogen is systematically sampled upon removal 
 (modeled via a constant notified sampling rate φ >> ψ).
 
-BD-CT(1) model therefore has 5 parameters:
+The BD-CT(1) model therefore has 5 parameters:
 * λ -- transmission rate
 * ψ -- removal rate
 * ρ -- sampling probability upon removal
@@ -36,19 +53,37 @@ These parameters can be expressed in terms of the following epidemiological para
 * 1/ψ -- infectious time
 * 1/φ -- notified contact removal time
 
-BD-CT(1) model makes 3 assumptions:
+The BD-CT(1) model makes 3 assumptions:
 1. only observed individuals can notify (instead of any removed individual);
 2. notified contacts are always observed upon removal;
 3. only the most recent contact can get notified.
 
 For identifiability, BD-CT(1) model requires one of the three BD model parameters (λ, ψ, ρ) to be fixed.
 
-## BD-CT(1) parameter estimator
 
-The bdct package provides a classical BD and a BD-CT(1) model maximum-likelihood parameter estimator 
+
+## BDSKY model
+
+The BD Skyline (BDSKY) model was introduced by Skyline was introduced by Stadler _et al._ [[PNAS 2013]](https://doi.org/10.1073/pnas.1207965110). 
+It extends the classical BD model (see above) with piece-wise constant parameter value changes. 
+
+A BDSKY model with k intervals has 3k + (k-1) parameters:
+* λ<sub>1</sub>, ..., λ<sub>k</sub> -- k transmission rates, one per skyline interval
+* ψ<sub>1</sub>, ..., ψ<sub>k</sub> -- k removal rates, one per skyline interval
+* ρ<sub>1</sub>, ..., ρ<sub>k</sub> -- k sampling probabilities upon removal, one per skyline interval
+* t<sub>1</sub>, ..., t<sub>k-1</sub> -- k-1 skyline interval changing times, where 0 < t<sub>1</sub> < ... < t<sub>k-1</sub> < T, where T is the end of the sampling period.
+
+For identifiability, the BDSKY model requires one of the three BD model parameters (λ<sub>i</sub>, ψ<sub>i</sub>, ρ<sub>i</sub>) to be fixed for each time interval i (0 ≤ i ≤ k).
+
+## BD, BD-CT(1) and BDSKY parameter estimators
+
+The bdct package provides a classical BD, BD-CT(1), and BDSKY model maximum-likelihood parameter estimators 
 from a user-supplied time-scaled phylogenetic tree (or a forest of trees). 
-User must also provide a value for one of the three BD model parameters (λ, ψ, or ρ). 
-We recommend providing the sampling probability ρ, 
+User must also provide a value for at least one of the three BD model parameters (λ, ψ, or ρ). 
+
+In the BDSKY case the values of one of the three BD model parameters need to be provided for all the skyline intervals. On top of that, providing interval changing times is highly recommended (but optional).
+
+For a parameter to be fixed, we recommend providing the sampling probability ρ, 
 which could be estimated as the number of tree tips divided by the number of declared cases for the same time period.
 
 ## CT test
@@ -103,10 +138,15 @@ The second command estimated the BD-CT(1) parameters and their 95% CIs for this 
 and saves the estimated parameters to a comma-separated file estimates_bdct.csv.
 The third command estimated the classical BD parameters and their 95% CIs for this tree, assuming the sampling probability of 0.25, 
 and saves the estimated parameters to a comma-separated file estimates_bd.csv.
+The fourth command estimated the BDSKY parameters and their 95% CIs for this tree, assuming two time intervals, 
+with a parameter change around the first tip sampling (21.68 years after the root time), 
+a very low sampling probability for the first interval (0.001) and a higher one for the second one (0.25), 
+and saves the estimated parameters to a comma-separated file estimates_bdsky.csv.
 ```bash
 ct_test --nwk Zurich.nwk --log cherry_test.txt
 bdct_infer --nwk Zurich.nwk --ci --p 0.25 --log estimates_bdct.csv
 bd_infer --nwk Zurich.nwk --ci --p 0.25 --log estimates_bd.csv
+bdsky_infer --nwk Zurich.nwk --ci --p 0.001 0.25 --skyline_times 21.68 --log estimates_bdsky.csv
 ```
 
 #### Help
@@ -116,6 +156,7 @@ To see detailed options, run:
 ct_test --help
 bdct_infer --help
 bd_infer --help
+bdsky_infer --help
 ```
 
 

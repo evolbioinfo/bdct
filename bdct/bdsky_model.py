@@ -38,7 +38,7 @@ def loglikelihood(forest, *params, T, threads=1, u=-1):
         c2_array[i] = get_c2(la_array[i], psi_array[i], c1_array[i], ci_array[i])
 
 
-    log_psi_rho_array = np.log(psi_array) + np.log(rho_array)
+    log_psi_rho_array = np.log(psi_array) + np.log(np.maximum(rho_array, EPSILON)) # avoid log(0)
     log_la_array = np.log(la_array)
 
     hidden_lk = get_u(la_array[0], psi_array[0], c1_array[0],
@@ -223,6 +223,16 @@ def infer(forest, T, la=None, psi=None, p=None, skyline_times=None,
         bounds[start * 3: start * 3 + 3:, 1] = upper_bounds
     bounds[n_intervals * 3:, :] = get_time_interval_bounds()
 
+    if n_la:
+        bounds[[3 * _ for _ in range(n_intervals)], 0] = la
+        bounds[[3 * _ for _ in range(n_intervals)], 1] = la
+    if n_psi:
+        bounds[[(3 * _ + 1)  for _ in range(n_intervals)], 0] = psi
+        bounds[[(3 * _ + 1) for _ in range(n_intervals)], 1] = psi
+    if n_p:
+        bounds[[(3 * _ + 2)  for _ in range(n_intervals)], 0] = p
+        bounds[[(3 * _ + 2) for _ in range(n_intervals)], 1] = p
+
     start_parameters = np.zeros(n_parameters)
     input_params = np.array([None] * n_parameters)
     for start in range(n_intervals):
@@ -232,10 +242,16 @@ def infer(forest, T, la=None, psi=None, p=None, skyline_times=None,
         input_params[start * 3: start * 3 + 3] = np.array([la_i, psi_i, p_i])
         if n_intervals > 1:
             print(f'\nLooking for starting parameters for interval {start} with the BD estimator...')
-            vs, _ = bd_model.infer(forest, T=T, la=la_i, psi=psi_i, p=p_i,
+            # Sampling probability could be zero for some skyline intervals, but not for BD,
+            # so let's make sure it is at least 10-6
+            vs, _ = bd_model.infer(forest, T=T, la=la_i, psi=psi_i,
+                                   p=max(p_i, EPSILON) if p_i is not None else None,
                                    lower_bounds=bounds[start * 3: start * 3 + 3, 0],
                                    upper_bounds=bounds[start * 3: start * 3 + 3, 1], ci=False,
                                    num_attemps=1)
+            # Put back the original sampling probability if it was specified
+            if p_i is not None:
+                vs[-1] = p_i
             start_parameters[start * 3: start * 3 + 3] = vs
         else:
             start_parameters[start * 3: start * 3 + 3] = get_start_parameters(forest, la_i, psi_i, p_i)
@@ -249,8 +265,8 @@ def infer(forest, T, la=None, psi=None, p=None, skyline_times=None,
     best_vs, best_lk = np.array(start_parameters), loglikelihood(forest, *start_parameters, T=T, threads=threads)
 
     print('\nBDSKY parameter optimization...')
-    print(f'Lower bounds are set to:\t{format_parameters(*lower_bounds, epi=False, T=T)}')
-    print(f'Upper bounds are set to:\t{format_parameters(*upper_bounds, epi=False, T=T)}')
+    print(f'Lower bounds are set to:\t{format_parameters(*bounds[:, 0], epi=False, T=T)}')
+    print(f'Upper bounds are set to:\t{format_parameters(*bounds[:, 1], epi=False, T=T)}')
     print(f'Starting parameters:\t{format_parameters(*start_parameters, fixed=input_params, T=T)}\tloglikelihood={best_lk}')
 
 
