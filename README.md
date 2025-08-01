@@ -2,11 +2,11 @@
 
 Maximum likelihood estimator of BD and BD-CT(1) model parameters from phylogenetic trees and a non-parametric CT detection test. 
 
-## Preprint
+## Article
 
-Anna Zhukova, Olivier Gascuel. Accounting for partner notification in epidemiological birth-death-models. medRxiv 2024.09.09.24313296; doi:[10.1101/2024.09.09.24313296](https://doi.org/10.1101/2024.09.09.24313296)
+Anna Zhukova, Olivier Gascuel (2025) Accounting for contact tracing in epidemiological birth-death models. _PLOS Comput Biol_ 21(5): e1012461; doi:[10.1371/journal.pcbi.1012461](https://doi.org/10.1371/journal.pcbi.1012461)
 
-[![DOI:10.1101/2024.09.09.24313296](https://zenodo.org/badge/DOI/10.1101/2024.09.09.24313296.svg)](https://doi.org/10.1101/2024.09.09.24313296)
+[![DOI:10.1371/journal.pcbi.1012461](https://zenodo.org/badge/DOI/10.1371/journal.pcbi.1012461.svg)](https://doi.org/10.1371/journal.pcbi.1012461)
 [![GitHub release](https://img.shields.io/github/v/release/evolbioinfo/bdct.svg)](https://github.com/evolbioinfo/bdct/releases)
 [![PyPI version](https://badge.fury.io/py/bdct.svg)](https://pypi.org/project/bdct/)
 [![PyPI downloads](https://shields.io/pypi/dm/bdct)](https://pypi.org/project/bdct/)
