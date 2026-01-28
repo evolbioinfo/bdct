@@ -1,4 +1,5 @@
 import os
+from collections import Counter
 from multiprocessing.pool import ThreadPool
 
 import numpy as np
@@ -303,12 +304,12 @@ def preprocess_node(params):
     return True
 
 
-def preprocess_forest(forest):
-    annotate_forest_with_time(forest)
+def preprocess_forest(forest, start_times=None):
+    annotate_forest_with_time(forest, start_times=start_times)
     preannotate_notifiers(forest)
 
 
-def loglikelihood(forest, la, psi, phi, rho, upsilon, T, threads=1):
+def loglikelihood(forest, la, psi, phi, rho, upsilon, T, threads=1, u=-1):
     c1 = get_c1(la=la, psi=psi, rho=rho)
     c2 = get_c2(la=la, psi=psi, c1=c1)
     log_la, log_psi, log_phi, log_rho, log_not_rho, log_ups, log_not_ups, log_2 = \
@@ -334,8 +335,18 @@ def loglikelihood(forest, la, psi, phi, rho, upsilon, T, threads=1):
         for node in all_nodes:
             preprocess_node(node)
 
-    u = get_u(la, psi, c1, E_t=get_E(c1=c1, c2=c2, t=0, T=T))
-    log_likelihood = len(forest) * u / (1 - u) * np.log(u)
+    log_likelihood = 0
+    if u is not None and u >= 0:
+        hidden_lk = get_u(la, psi, c1, E_t=get_E(c1=c1, c2=c2, t=0, T=T))
+        if hidden_lk:
+            log_likelihood = len(forest) * hidden_lk / (1 - hidden_lk) * np.log(hidden_lk)
+    else:
+        t_starts = Counter(getattr(tree, TIME) - tree.dist for tree in forest)
+        for t_start, count in t_starts.items():
+            hidden_lk = get_u(la, psi, c1, E_t=get_E(c1=c1, c2=c2, t=t_start, T=T))
+            if hidden_lk:
+                log_likelihood += count * hidden_lk / (1 - hidden_lk) * np.log(hidden_lk)
+
     for tree in forest:
         for node in tree.traverse('postorder'):
             if node.is_leaf():
@@ -458,26 +469,50 @@ def save_results(vs, cis, log, ci=False):
 
 def main():
     """
-    Entry point for tree parameter estimation with the BDCT(1) model with command-line arguments.
+    Entry point for tree parameter estimation with the BD-CT(1) model with command-line arguments.
     :return: void
     """
     import argparse
 
+
     parser = \
-        argparse.ArgumentParser(description="Estimates BDCT(1) parameters for a given tree/forest.")
-    parser.add_argument('--la', required=False, default=None, type=float, help="transmission rate")
-    parser.add_argument('--psi', required=False, default=None, type=float, help="removal rate")
-    parser.add_argument('--p', required=False, default=None, type=float, help='sampling probability')
-    parser.add_argument('--upsilon', required=False, default=None, type=float, help='contact tracing probability')
-    parser.add_argument('--phi', required=False, default=None, type=float, help='notified sampling rate')
+        argparse.ArgumentParser(description="BD-CT(1) model parameter estimator. "
+                                            "The BD-CT(1) model is parameterised with five parameters: "
+                                            "three classical BD model parameters: "
+                                            "transmission rate la, removal rate psi, sampling probability upon removal p, "
+                                            "and two CT-specific ones: "
+                                            "contact-tracing probability upon sampling upsilon, "
+                                            "and notified sampling rate phi. "
+                                            "At least one of the classical BD model parameters needs to be given "
+                                            "as an input for identifiability.")
+    parser.add_argument('--nwk', required=True, type=str,
+                        help="input file in newick or nexus format, containing one or multiple transmission trees. "
+                             "If multiple trees are provided, they are treated as having the same parameters.")
+    parser.add_argument('--la', required=False, default=None, type=float,
+                        help="transmission rate (if not provided, will be estimated)")
+    parser.add_argument('--psi', required=False, default=None, type=float,
+                        help="removal rate (if not provided, will be estimated)")
+    parser.add_argument('--p', required=False, default=None, type=float,
+                        help='sampling probability (if not provided, will be estimated)')
+    parser.add_argument('--upsilon', required=False, default=None, type=float,
+                        help='contact-tracing probability (if not provided, will be estimated)')
+    parser.add_argument('--phi', required=False, default=None, type=float,
+                        help='notified sampling rate (if not provided, will be estimated)')
+    parser.add_argument('--start_times', nargs='*', type=float,
+                        help='If multiple trees are provided in the input file, their start times '
+                             '(i.e., times at the beginning of their root branches) are by default considered to be equal. '
+                             'If a different behaviour is needed, one should specify as many start times here '
+                             'as there are trees in the input file.')
     parser.add_argument('--log', required=True, type=str, help="output log file")
-    parser.add_argument('--nwk', required=True, type=str, help="input tree/forest file")
-    parser.add_argument('--upper_bounds', required=False, type=float, nargs=5,
-                        help="upper bounds for parameters (la, psi, phi, p, upsilon)", default=DEFAULT_UPPER_BOUNDS)
-    parser.add_argument('--lower_bounds', required=False, type=float, nargs=5,
-                        help="lower bounds for parameters (la, psi, phi, p, upsilon)", default=DEFAULT_LOWER_BOUNDS)
+    parser.add_argument('--upper_bounds', required=False, type=float, nargs=3,
+                        help="upper bounds for BD-CT(1) parameters: la, psi, phi, p, upsilon (all need to specified, even the fixed ones)",
+                        default=DEFAULT_UPPER_BOUNDS)
+    parser.add_argument('--lower_bounds', required=False, type=float, nargs=3,
+                        help="lower bounds for BD-CT(1) parameters: la, psi, phi, p, upsilon (all need to specified, even the fixed ones)",
+                        default=DEFAULT_LOWER_BOUNDS)
     parser.add_argument('--ci', action="store_true", help="calculate the CIs")
-    parser.add_argument('--threads', required=False, type=int, default=1, help="number of threads for parallelization")
+    parser.add_argument('--threads', required=False, type=int, default=1,
+                        help="number of threads for parallelization")
     params = parser.parse_args()
 
     if params.la is None and params.psi is None and params.p is None:
@@ -485,10 +520,11 @@ def main():
                          'for identifiability')
 
     forest = read_forest(params.nwk)
-    preprocess_forest(forest)
+    preprocess_forest(forest, start_times=params.start_times)
+    t_start = min(getattr(tree, TIME) - tree.dist for tree in forest)
     T = get_T(T=None, forest=forest)
-    print('Read a forest of {} trees with {} tips in total, evolving over time {}'
-          .format(len(forest), sum(len(_) for _ in forest), T))
+    print('Read a forest of {} trees with {} tips in total, evolving between times {} and {}.'
+          .format(len(forest), sum(len(_) for _ in forest), t_start, T))
     vs, cis = infer(forest, T, **vars(params))
 
     save_results(vs, cis, params.log, ci=params.ci)
@@ -496,23 +532,40 @@ def main():
 
 def loglikelihood_main():
     """
-    Entry point for tree likelihood estimation with the BDCT(1) model with command-line arguments.
+    Entry point for tree likelihood calculation under the BD-CT(1) model with command-line arguments.
     :return: void
     """
     import argparse
 
     parser = \
-        argparse.ArgumentParser(description="Calculate BDCT(1) likelihood on a given tree/forest for given parameter values.")
+        argparse.ArgumentParser(description="BD-CT(1) model likelihood calculator. "
+                                            "The BD-CT(1) model is parameterised with five parameters: "
+                                            "three classical BD model parameters: "
+                                            "transmission rate la, removal rate psi, sampling probability upon removal p, "
+                                            "and two CT-specific ones: "
+                                            "contact-tracing probability upon sampling upsilon, "
+                                            "and notified sampling rate phi.")
     parser.add_argument('--la', required=True, type=float, help="transmission rate")
     parser.add_argument('--psi', required=True, type=float, help="removal rate")
     parser.add_argument('--p', required=True, type=float, help='sampling probability')
-    parser.add_argument('--upsilon', required=True, type=float, help='contact tracing probability')
+    parser.add_argument('--upsilon', required=True, type=float, help='contact-tracing probability')
     parser.add_argument('--phi', required=True, type=float, help='notified sampling rate')
-    parser.add_argument('--nwk', required=True, type=str, help="input tree file")
+    parser.add_argument('--nwk', required=True, type=str,
+                        help="input file in newick or nexus format, containing one or multiple transmission trees. "
+                             "If multiple trees are provided, they are treated as having the same parameters.")
+    parser.add_argument('--start_times', nargs='*', type=float,
+                        help='If multiple trees are provided in the input file, their start times '
+                             '(i.e., times at the beginning of their root branches) are by default considered to be equal. '
+                             'If a different behaviour is needed, one should specify as many start times here '
+                             'as there are trees in the input file.')
+    parser.add_argument('--u', required=False, type=int, default=-1,
+                        help="number of hidden trees (i.e., trees with no sampled tips). "
+                             "By default this value is estimated based on the number of observed trees "
+                             "(i.e., given in the input file).")
     params = parser.parse_args()
 
     forest = read_forest(params.nwk)
-    preprocess_forest(forest)
+    preprocess_forest(forest, start_times=params.start_times)
     T = get_T(T=None, forest=forest)
     lk = loglikelihood(forest, la=params.la, psi=params.psi, rho=params.p, phi=params.phi, upsilon=params.upsilon, T=T)
     print(lk)

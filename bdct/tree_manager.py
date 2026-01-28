@@ -155,8 +155,8 @@ def annotate_forest_with_time(forest, start_times=None):
         start_times = [0] * len(forest)
 
     for tree, start_time in zip(forest, start_times):
-        if not hasattr(tree, TIME):
-            annotate_tree_with_time(tree, start_time)
+        # if not hasattr(tree, TIME):
+        annotate_tree_with_time(tree, start_time)
 
 
 def get_T(T, forest):
