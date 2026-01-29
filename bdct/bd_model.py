@@ -88,12 +88,13 @@ def loglikelihood(forest, la, psi, rho, T, threads=1, u=-1):
     log_la = np.log(la)
 
     res = 0
+    t_starts = Counter(getattr(tree, TIME) - tree.dist for tree in forest)
     if u is not None and u >= 0:
-        hidden_lk = get_u(la, psi, c1, E_t=get_E(c1=c1, c2=c2, t=0, T=T))
+        t_start_avg = sum(t_starts.elements()) / t_starts.total()
+        hidden_lk = get_u(la, psi, c1, E_t=get_E(c1=c1, c2=c2, t=t_start_avg, T=T))
         if hidden_lk:
             res = len(forest) * hidden_lk / (1 - hidden_lk) * np.log(hidden_lk)
     else:
-        t_starts = Counter(getattr(tree, TIME) - tree.dist for tree in forest)
         for t_start, count in t_starts.items():
             hidden_lk = get_u(la, psi, c1, E_t=get_E(c1=c1, c2=c2, t=t_start, T=T))
             if hidden_lk:
@@ -221,7 +222,7 @@ def format_parameters(la, psi, rho, fixed=None, epi=True):
 
 def main():
     """
-    Entry point for tree parameter estimation with the BD model with command-line arguments.
+    Entry point for tree/forest parameter estimation under the BD model with command-line arguments.
     :return: void
     """
     import argparse
@@ -272,7 +273,7 @@ def main():
 
 def loglikelihood_main():
     """
-    Entry point for tree likelihood estimation with the BD model with command-line arguments.
+    Entry point for tree/forest likelihood estimation under the BD model with command-line arguments.
     :return: void
     """
     import argparse

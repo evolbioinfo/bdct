@@ -5,10 +5,9 @@ import numpy as np
 
 from bdct import bd_model, bdsky_model
 from bdct.bdsky_model import time_intervals2optimized_values, optimized_values2time_intervals
-from bdct.tree_manager import get_T, annotate_forest_with_time, read_forest
+from bdct.tree_manager import get_T, annotate_forest_with_time, read_forest, TIME
 
 NWK = os.path.join(os.path.dirname(__file__), 'data', 'tree.bd.nwk')
-# NWK = "1:1.2;"
 
 """
 Expected BD output:
@@ -140,3 +139,59 @@ class BDSKYTest(unittest.TestCase):
         [_, _, _, la, psi, _, _], _ = bdsky_model.infer(forest, T, p=[p, p], skyline_times=[T * 1e-6])
         self.assertAlmostEqual(psi_bd, psi, places=2)
 
+
+
+    def test_forest_flat(self):
+        tree = read_forest(NWK)[0]
+        annotate_forest_with_time([tree])
+        T = get_T(T=None, forest=[tree])
+
+        forest = []
+        t_start = 0.1 * T
+        todo = [tree]
+        while todo:
+            node = todo.pop()
+            time = getattr(node, TIME)
+            if time >= t_start:
+                node.up = None
+                node.dist = min(node.dist, time - t_start)
+                forest.append(node)
+            else:
+                todo.extend(node.children)
+
+        print(len(forest))
+
+        [la_bd, psi_bd, _], _ = bd_model.infer(forest, T, p=p)
+        [la1, psi1, _, la2, psi2, _, _], _ = bdsky_model.infer(forest, T, p=[p, p], skyline_times=[T * 1e-6])
+        self.assertAlmostEqual(psi_bd, psi1, places=2)
+        self.assertAlmostEqual(la_bd, la1, places=2)
+        self.assertAlmostEqual(psi_bd, psi2, places=2)
+        self.assertAlmostEqual(la_bd, la2, places=2)
+
+
+    def test_forest_clusters(self):
+        tree = read_forest(NWK)[0]
+        annotate_forest_with_time([tree])
+        T = get_T(T=None, forest=[tree])
+
+        forest = []
+        # let's take clusters that are 4 branches away from the root
+        todo = [(tree, 0)]
+        while todo:
+            node, level = todo.pop()
+            if level >= 4:
+                node.up = None
+                node.dist = 0
+                forest.append(node)
+            else:
+                todo.extend([(c, level + 1) for c in node.children])
+
+        print([getattr(_, TIME) for _ in forest])
+
+
+        [la_bd, psi_bd, _], _ = bd_model.infer(forest, T, p=p)
+        [la1, psi1, _, la2, psi2, _, _], _ = bdsky_model.infer(forest, T, p=[p, p], skyline_times=[T * 1e-6])
+        self.assertAlmostEqual(psi_bd, psi1, places=2)
+        self.assertAlmostEqual(la_bd, la1, places=2)
+        self.assertAlmostEqual(psi_bd, psi2, places=2)
+        self.assertAlmostEqual(la_bd, la2, places=2)

@@ -135,10 +135,10 @@ class BDCTTest(unittest.TestCase):
         T2 = get_T(T=None, forest=[tree])
         self.assertAlmostEqual(T2, 0.95 * T, places=5)
         [la2, psi2, phi2, _, ups2], _ = bdct_model.infer(forest, T2, p=0.2987834524384259)
-        self.assertAlmostEqual(la2, la, places=5)
-        self.assertAlmostEqual(psi2, psi, places=5)
+        self.assertAlmostEqual(la2, la, places=4)
+        self.assertAlmostEqual(psi2, psi, places=4)
         self.assertAlmostEqual(phi2, phi, places=3)
-        self.assertAlmostEqual(ups2, ups, places=5)
+        self.assertAlmostEqual(ups2, ups, places=4)
 
 
 

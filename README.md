@@ -84,16 +84,20 @@ User must also provide a value for at least one of the three BD model parameters
 In the BDSKY case the values of one of the three BD model parameters need to be provided for all the skyline intervals. On top of that, providing interval changing times is highly recommended (but optional).
 
 For a parameter to be fixed, we recommend providing the sampling probability ρ, 
-which could be estimated as the number of tree tips divided by the number of declared cases for the same time period.
+which could be approximated as the number of tree tips divided by the number of declared cases for the same time period.
+
+If the user-supplied file contains several trees, their starting times (beginning of the root branches) are by default assumed to be equal (t=0). 
+However, this can be changed by providing starting times for each tree with the --start_times option.
 
 ## CT test
 
-The bdct package provides a non-parametric test detecting presence/absence of contact tracing in a user-supplied time-scaled phylogenetic tree/forest. 
+The bdct package provides a non-parametric test detecting presence/absence of contact tracing 
+in a user-supplied time-scaled phylogenetic tree/forest. 
 It outputs a p-value and the number of cherries in the tree. 
 
 ## Input data
-One needs to supply a time-scaled phylogenetic tree in newick format, or a collection of trees (one per line in the newick file), 
-which will be treated as all belonging to the same epidemic (i.e., having the same BD-CT(1) model parameters). 
+One needs to supply a time-scaled phylogenetic tree in newick or nexus format, or a collection of trees (one per line in the newick file), 
+which will be treated as all belonging to the same epidemic (i.e., having the same BD/BD-CT(1)/BDSKY model parameters). 
 In the examples below we will use an HIV tree reconstructed from 200 sequences, 
 published in [[Rasmussen _et al._ PLoS Comput. Biol. 2017]](https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1005448), 
 which you can find at [PairTree GitHub](https://github.com/davidrasm/PairTree) 
@@ -141,7 +145,9 @@ and saves the estimated parameters to a comma-separated file estimates_bd.csv.
 The fourth command estimated the BDSKY parameters and their 95% CIs for this tree, assuming two time intervals, 
 with a parameter change around the first tip sampling (21.68 years after the root time), 
 a very low sampling probability for the first interval (0.001) and a higher one for the second one (0.25), 
-and saves the estimated parameters to a comma-separated file estimates_bdsky.csv.
+and saves the estimated parameters to a comma-separated file estimates_bdsky.csv. 
+Note that if the skyline changing times are not provided, they will be estimated. 
+However, it is recommended to provide them when possible.
 ```bash
 ct_test --nwk Zurich.nwk --log cherry_test.txt
 bdct_infer --nwk Zurich.nwk --ci --p 0.25 --log estimates_bdct.csv

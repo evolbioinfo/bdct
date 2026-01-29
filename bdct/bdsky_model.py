@@ -1,4 +1,5 @@
 import os
+from collections import Counter
 
 import numpy as np
 from bdct import bd_model
@@ -41,13 +42,31 @@ def loglikelihood(forest, *params, T, threads=1, u=-1):
     log_psi_rho_array = np.log(psi_array) + np.log(np.maximum(rho_array, EPSILON)) # avoid log(0)
     log_la_array = np.log(la_array)
 
-    hidden_lk = get_u(la_array[0], psi_array[0], c1_array[0],
-                      E_t=get_E(c1=c1_array[0], c2=c2_array[0], t=0, T=skyline_times[0]))
-    if hidden_lk:
-        u = len(forest) * hidden_lk / (1 - hidden_lk) if u is None or u < 0 else u
-        res = u * np.log(hidden_lk)
+    res = 0
+    t_starts = Counter(getattr(tree, TIME) - tree.dist for tree in forest)
+    if u is not None and u >= 0:
+        t_start_avg = sum(t_starts.elements()) / t_starts.total()
+        interval = 0
+        if n_intervals:
+            while interval < (n_intervals - 1) and t_start_avg > skyline_times[interval]:
+                interval += 1
+
+        hidden_lk = get_u(la_array[interval], psi_array[interval], c1_array[interval],
+                          E_t=get_E(c1=c1_array[interval], c2=c2_array[interval],
+                                    t=t_start_avg, T=skyline_times[interval]))
+        if hidden_lk:
+            res = len(forest) * hidden_lk / (1 - hidden_lk) * np.log(hidden_lk)
     else:
-        res = 0
+        interval = 0
+        for t_start in sorted(t_starts.keys()):
+            if n_intervals:
+                while interval < (n_intervals - 1) and t_start > skyline_times[interval]:
+                    interval += 1
+            hidden_lk = get_u(la_array[interval], psi_array[interval], c1_array[interval],
+                              E_t=get_E(c1=c1_array[interval], c2=c2_array[interval],
+                                        t=t_start, T=skyline_times[interval]))
+            if hidden_lk:
+                res += t_starts[t_start] * hidden_lk / (1 - hidden_lk) * np.log(hidden_lk)
 
     for tree in forest:
         interval = 0
@@ -426,21 +445,32 @@ def format_parameters(*params, T, fixed=None, epi=True):
 
 def main():
     """
-    Entry point for tree parameter estimation with the BDSKY model with command-line arguments.
+    Entry point for tree/forest parameter estimation under the BDSKY model with command-line arguments.
     :return: void
     """
     import argparse
 
     parser = \
-        argparse.ArgumentParser(description="Estimate BDSKY parameters.")
-    parser.add_argument('--nwk', required=True, type=str, help="input tree file")
+        argparse.ArgumentParser(description="BDSKY model parameter estimator. "
+                                            "The BDSKY model is parameterised with several time intervals,"
+                                            "for each of which there are three BD parameters: "
+                                            "transmission rate la, removal rate psi, and sampling probability upon removal p. "
+                                            "At least one of these parameters needs to be given as an input for identifiability.")
+    parser.add_argument('--nwk', required=True, type=str,
+                        help="input file in newick or nexus format, containing one or multiple transmission trees. "
+                             "If multiple trees are provided, they are treated as having the same parameters.")
+    parser.add_argument('--start_times', nargs='*', type=float,
+                        help='If multiple trees are provided in the input file, their start times '
+                             '(i.e., times at the beginning of their root branches) are by default considered to be equal. '
+                             'If a different behaviour is needed, one should specify as many start times here '
+                             'as there are trees in the input file.')
 
     parser.add_argument('--la', nargs='*', default=None, type=float,
-                        help="List of transmission rates (one per skyline interval).")
+                        help="List of transmission rates (one per skyline interval, if not provided, will be estimated).")
     parser.add_argument('--psi', nargs='*', default=None, type=float,
-                        help="List of removal rates (one per skyline interval).")
+                        help="List of removal rates (one per skyline interval, if not provided, will be estimated).")
     parser.add_argument('--p', nargs='*', default=None, type=float,
-                        help="List of sampling probabilities (one per skyline interval).")
+                        help="List of sampling probabilities (one per skyline interval, if not provided, will be estimated).")
     parser.add_argument('--skyline_times', nargs='*', default=None, type=float,
                         help="List of time points specifying when to switch from model i to model i+1 in the Skyline."
                              "Must be sorted in ascending order and contain one less elements "
@@ -449,9 +479,11 @@ def main():
 
     parser.add_argument('--log', required=True, type=str, help="output log file")
     parser.add_argument('--upper_bounds', required=False, type=float, nargs=3,
-                        help="upper bounds for parameters (la, psi, p)", default=DEFAULT_UPPER_BOUNDS)
+                        help="upper bounds for parameters: la psi p (all need to specified, even the fixed ones, "
+                             "the same bounds are used for all the intervals)", default=DEFAULT_UPPER_BOUNDS)
     parser.add_argument('--lower_bounds', required=False, type=float, nargs=3,
-                        help="lower bounds for parameters (la, psi, p)", default=DEFAULT_LOWER_BOUNDS)
+                        help="lower bounds for parameters  la psi p (all need to specified, even the fixed ones, "
+                             "the same bounds are used for all the intervals)", default=DEFAULT_LOWER_BOUNDS)
     parser.add_argument('--ci', action="store_true", help="calculate the CIs")
     params = parser.parse_args()
 
@@ -460,10 +492,11 @@ def main():
 
     forest = read_forest(params.nwk)
     # resolve_forest(forest)
-    annotate_forest_with_time(forest)
+    annotate_forest_with_time(forest, start_times=params.start_times)
+    t_start = min(getattr(tree, TIME) - tree.dist for tree in forest)
     T = get_T(T=None, forest=forest)
-    print('Read a forest of {} trees with {} tips in total, evolving over time {}'
-          .format(len(forest), sum(len(_) for _ in forest), T))
+    print('Read a forest of {} trees with {} tips in total, evolving between times {} and {}.'
+          .format(len(forest), sum(len(_) for _ in forest), t_start, T))
 
     vs, cis = infer(forest, T=T, **vars(params))
     save_results(vs, cis, T, params.log, ci=params.ci)
@@ -471,13 +504,27 @@ def main():
 
 def loglikelihood_main():
     """
-    Entry point for tree likelihood estimation with the BD model with command-line arguments.
+    Entry point for tree/forest likelihood estimation under the BDSKY model with command-line arguments.
     :return: void
     """
     import argparse
 
+
     parser = \
-        argparse.ArgumentParser(description="Calculate BD likelihood on a given forest for given parameter values.")
+        argparse.ArgumentParser(description="BDSKY model likelihood calculator. "
+                                            "The BDSKY model is parameterised with several time intervals,"
+                                            "for each of which there are three BD parameters: "
+                                            "transmission rate la, removal rate psi, and sampling probability upon removal p.")
+
+
+    parser.add_argument('--nwk', required=True, type=str,
+                        help="input file in newick or nexus format, containing one or multiple transmission trees. "
+                             "If multiple trees are provided, they are treated as having the same parameters.")
+    parser.add_argument('--start_times', nargs='*', type=float,
+                        help='If multiple trees are provided in the input file, their start times '
+                             '(i.e., times at the beginning of their root branches) are by default considered to be equal. '
+                             'If a different behaviour is needed, one should specify as many start times here '
+                             'as there are trees in the input file.')
 
     parser.add_argument('--la', nargs='+', type=float,
                         help="List of transmission rates (one per skyline interval).")
@@ -491,14 +538,11 @@ def loglikelihood_main():
                              "than the number of models in the Skyline."
                              "The first model always starts at time 0.")
 
-    parser.add_argument('--nwk', required=True, type=str, help="input tree file")
-    parser.add_argument('--u', required=False, type=int, default=-1,
-                        help="number of hidden trees (estimated by default)")
     params = parser.parse_args()
 
     forest = read_forest(params.nwk)
     # resolve_forest(forest)
-    annotate_forest_with_time(forest)
+    annotate_forest_with_time(forest, start_times=params.start_times)
     T = get_T(T=None, forest=forest)
 
     n_la, n_psi, n_p = len(params.la), len(params.psi), len(params.p)
