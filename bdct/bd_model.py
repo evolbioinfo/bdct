@@ -1,4 +1,5 @@
 import os
+from collections import Counter
 
 import numpy as np
 
@@ -86,12 +87,18 @@ def loglikelihood(forest, la, psi, rho, T, threads=1, u=-1):
     log_psi_rho = np.log(psi) + np.log(rho)
     log_la = np.log(la)
 
-    hidden_lk = get_u(la, psi, c1, E_t=get_E(c1=c1, c2=c2, t=0, T=T))
-    if hidden_lk:
-        u = len(forest) * hidden_lk / (1 - hidden_lk) if u is None or u < 0 else u
-        res = u * np.log(hidden_lk)
+    res = 0
+    if u is not None and u >= 0:
+        hidden_lk = get_u(la, psi, c1, E_t=get_E(c1=c1, c2=c2, t=0, T=T))
+        if hidden_lk:
+            res = len(forest) * hidden_lk / (1 - hidden_lk) * np.log(hidden_lk)
     else:
-        res = 0
+        t_starts = Counter(getattr(tree, TIME) - tree.dist for tree in forest)
+        for t_start, count in t_starts.items():
+            hidden_lk = get_u(la, psi, c1, E_t=get_E(c1=c1, c2=c2, t=t_start, T=T))
+            if hidden_lk:
+                res += count * hidden_lk / (1 - hidden_lk) * np.log(hidden_lk)
+
     for tree in forest:
         n = len(tree)
         res += n * log_psi_rho
@@ -220,16 +227,31 @@ def main():
     import argparse
 
     parser = \
-        argparse.ArgumentParser(description="Estimated BD parameters.")
-    parser.add_argument('--nwk', required=True, type=str, help="input tree file")
-    parser.add_argument('--la', required=False, default=None, type=float, help="transmission rate")
-    parser.add_argument('--psi', required=False, default=None, type=float, help="removal rate")
-    parser.add_argument('--p', required=False, default=None, type=float, help='sampling probability')
+        argparse.ArgumentParser(description="BD model parameter estimator. "
+                                            "The BD model is parameterised with three parameters: "
+                                            "transmission rate la, removal rate psi, and sampling probability upon removal p. "
+                                            "At least one of these parameters needs to be given as an input for identifiability.")
+    parser.add_argument('--nwk', required=True, type=str,
+                        help="input file in newick or nexus format, containing one or multiple transmission trees. "
+                             "If multiple trees are provided, they are treated as having the same parameters.")
+    parser.add_argument('--la', required=False, default=None, type=float,
+                        help="transmission rate (if not provided, will be estimated)")
+    parser.add_argument('--psi', required=False, default=None, type=float,
+                        help="removal rate (if not provided, will be estimated)")
+    parser.add_argument('--p', required=False, default=None, type=float,
+                        help='sampling probability (if not provided, will be estimated)')
+    parser.add_argument('--start_times', nargs='*', type=float,
+                        help='If multiple trees are provided in the input file, their start times '
+                             '(i.e., times at the beginning of their root branches) are by default considered to be equal. '
+                             'If a different behaviour is needed, one should specify as many start times here '
+                             'as there are trees in the input file.')
     parser.add_argument('--log', required=True, type=str, help="output log file")
     parser.add_argument('--upper_bounds', required=False, type=float, nargs=3,
-                        help="upper bounds for parameters (la, psi, p)", default=DEFAULT_UPPER_BOUNDS)
+                        help="upper bounds for BD parameters: la psi p (all need to specified, even the fixed ones)",
+                        default=DEFAULT_UPPER_BOUNDS)
     parser.add_argument('--lower_bounds', required=False, type=float, nargs=3,
-                        help="lower bounds for parameters (la, psi, p)", default=DEFAULT_LOWER_BOUNDS)
+                        help="lower bounds for BD parameters: la psi p (all need to specified, even the fixed ones)",
+                        default=DEFAULT_LOWER_BOUNDS)
     parser.add_argument('--ci', action="store_true", help="calculate the CIs")
     params = parser.parse_args()
 
@@ -238,10 +260,11 @@ def main():
 
     forest = read_forest(params.nwk)
     # resolve_forest(forest)
-    annotate_forest_with_time(forest)
+    annotate_forest_with_time(forest, start_times=params.start_times)
+    t_start = min(getattr(tree, TIME) - tree.dist for tree in forest)
     T = get_T(T=None, forest=forest)
-    print('Read a forest of {} trees with {} tips in total, evolving over time {}'
-          .format(len(forest), sum(len(_) for _ in forest), T))
+    print('Read a forest of {} trees with {} tips in total, evolving between times {} and {}.'
+          .format(len(forest), sum(len(_) for _ in forest), t_start, T))
 
     vs, cis = infer(forest, T, **vars(params))
     save_results(vs, cis, params.log, ci=params.ci)
@@ -255,18 +278,25 @@ def loglikelihood_main():
     import argparse
 
     parser = \
-        argparse.ArgumentParser(description="Calculate BD likelihood on a given forest for given parameter values.")
+        argparse.ArgumentParser(description="BD model likelihood calculator. "
+                                            "The BD model is parameterised with three parameters: "
+                                            "transmission rate la, removal rate psi, and sampling probability upon removal p.")
     parser.add_argument('--la', required=True, type=float, help="transmission rate")
     parser.add_argument('--psi', required=True, type=float, help="removal rate")
     parser.add_argument('--p', required=True, type=float, help='sampling probability')
-    parser.add_argument('--nwk', required=True, type=str, help="input tree file")
-    parser.add_argument('--u', required=False, type=int, default=-1,
-                        help="number of hidden trees (estimated by default)")
+    parser.add_argument('--nwk', required=True, type=str,
+                        help="input file in newick or nexus format, containing one or multiple transmission trees. "
+                             "If multiple trees are provided, they are treated as having the same parameters.")
+    parser.add_argument('--start_times', nargs='*', type=float,
+                        help='If multiple trees are provided in the input file, their start times '
+                             '(i.e., times at the beginning of their root branches) are by default considered to be equal. '
+                             'If a different behaviour is needed, one should specify as many start times here '
+                             'as there are trees in the input file.')
     params = parser.parse_args()
 
     forest = read_forest(params.nwk)
     # resolve_forest(forest)
-    annotate_forest_with_time(forest)
+    annotate_forest_with_time(forest, start_times=params.start_times)
     T = get_T(T=None, forest=forest)
     lk = loglikelihood(forest, la=params.la, psi=params.psi, rho=params.p, T=T)
     print(lk)
