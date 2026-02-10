@@ -16,14 +16,14 @@ INTERVAL_END_TIME = 'time at interval end'
 INTERVAL = 'interval'
 
 
-def loglikelihood(forest, *params, T, threads=1, u=-1):
+def loglikelihood(forest, *params, T, t_start=0, threads=1, u=-1, **kwargs):
     n_intervals = (len(params) + 1) // 4 # 3 parameters per interval + n_intervals - 1 skyline times
 
     la_array = params[0:n_intervals * 3:3]
     psi_array = params[1:n_intervals * 3:3]
     rho_array = params[2:n_intervals * 3:3]
 
-    skyline_times = optimized_values2time_intervals(params[n_intervals * 3:], T)
+    skyline_times = optimized_values2time_intervals(params[n_intervals * 3:], T=T, t_start=t_start)
 
 
     c1_array = np.zeros(n_intervals)
@@ -117,38 +117,41 @@ def get_time_interval_start(n_intervals):
 def get_time_interval_bounds():
     return 0.01, 0.99
 
-def time_intervals2optimized_values(skyline_times):
+def time_intervals2optimized_values(skyline_times, t_start=0):
     """
     Converts skyline times [t_1, ..., t_{n-1}, T] to fractions f_i used for optimization,
-    where f_1 is t_1 as the fraction of total time (between 0 and T): t_1 / T,
+    where f_1 is t_1 as the fraction of total time (between t_start and T): (t_1 - t_start) / T,
     f_2 is t_2 as the fraction of time between t_1 and T: (t2 - t1) / (T - t1), etc.
 
     :param skyline_times: np.array containing n skyline change times [t_1, ..., t_{n-1}, T],
         the last time being the end of the sampling period T
+    :param t_start: the time at which the first tree of the forest starts (0 by default,
+        but can be set to the actual tree start time if it is not 0)
     :return: np.array containing n - 1 fractions f_1, f_{n-1} described above.
     """
 
     fs = np.zeros(len(skyline_times) - 1)
-    start_t = 0
     for (idx, st) in enumerate(skyline_times[:-1]):
         # this time as proportion of the time left till the tree end
-        fs[idx] = (st - start_t) / (skyline_times[-1] - start_t)
-        start_t = st
+        fs[idx] = (st - t_start) / (skyline_times[-1] - t_start)
+        t_start = st
     return fs
 
-def optimized_values2time_intervals(fs, T):
+def optimized_values2time_intervals(fs, T, t_start=0):
     """
     Converts values f_i used for optimization to skyline times [t_1, ..., t_{n-1}, T],
-    where f_1 is t_1 as the fraction of total time (between 0 and T): t_1 / T,
+    where f_1 is t_1 as the fraction of total time (between t_start and T): (t_1 - t_start) / T,
     f_2 is t_2 as the fraction of time between t_1 and T: (t2 - t1) / (T - t1), etc.
 
     :param fs: np.array containing f_i described above.
+    :param T: the end of the sampling period
+    :param t_start: the time at which the first tree of the forest starts (0 by default,
+        but can be set to the actual tree start time if it is not 0)
     :return: np.array containing n skyline change times [t_1, ..., t_{n-1}, T],
         the last time being the end of the sampling period T
     """
     skyline_times = np.zeros(len(fs) + 1)
     skyline_times[-1] = T
-    t_start = 0
     for i, fraction in enumerate(fs):
         if fraction is not None and t_start is not None:
             skyline_times[i] = t_start + (T - t_start) * fraction
@@ -158,7 +161,7 @@ def optimized_values2time_intervals(fs, T):
     return skyline_times
 
 
-def infer(forest, T, la=None, psi=None, p=None, skyline_times=None,
+def infer(forest, T, t_start=0, la=None, psi=None, p=None, skyline_times=None,
           lower_bounds=DEFAULT_LOWER_BOUNDS, upper_bounds=DEFAULT_UPPER_BOUNDS, ci=False, threads=1, num_attemps=3, **kwargs):
     """
     Infers BD model parameters from a given forest.
@@ -276,23 +279,24 @@ def infer(forest, T, la=None, psi=None, p=None, skyline_times=None,
             start_parameters[start * 3: start * 3 + 3] = get_start_parameters(forest, la_i, psi_i, p_i)
     if n_intervals > 1:
         if n_t:
-            start_parameters[n_intervals * 3: ] = time_intervals2optimized_values(skyline_times)
+            start_parameters[n_intervals * 3: ] = time_intervals2optimized_values(skyline_times, t_start=t_start)
             input_params[n_intervals * 3: ] = start_parameters[n_intervals * 3: ]
         else:
             start_parameters[n_intervals * 3:] = get_time_interval_start(n_intervals)
 
-    best_vs, best_lk = np.array(start_parameters), loglikelihood(forest, *start_parameters, T=T, threads=threads)
+    best_vs, best_lk = np.array(start_parameters), loglikelihood(forest, *start_parameters,
+                                                                 T=T, t_start=t_start, threads=threads)
 
     print('\nBDSKY parameter optimization...')
-    print(f'Lower bounds are set to:\t{format_parameters(*bounds[:, 0], epi=False, T=T)}')
-    print(f'Upper bounds are set to:\t{format_parameters(*bounds[:, 1], epi=False, T=T)}')
-    print(f'Starting parameters:\t{format_parameters(*start_parameters, fixed=input_params, T=T)}\tloglikelihood={best_lk}')
+    print(f'Lower bounds are set to:\t{format_parameters(*bounds[:, 0], epi=False, T=T, t_start=t_start)}')
+    print(f'Upper bounds are set to:\t{format_parameters(*bounds[:, 1], epi=False, T=T, t_start=t_start)}')
+    print(f'Starting parameters:\t{format_parameters(*start_parameters, fixed=input_params, T=T, t_start=t_start)}\tloglikelihood={best_lk}')
 
 
-    vs, lk = optimize_current_setting(bounds, n_intervals, start_parameters, input_params, forest, T,
+    vs, lk = optimize_current_setting(bounds, n_intervals, start_parameters, input_params, forest, T, t_start=t_start,
                                       n_times_to_optimize=n_intervals - 1 - n_t, threads=1)
 
-    print(f'Estimated BDSKY parameters:\t{format_parameters(*vs, T=T)};\tloglikelihood={lk}')
+    print(f'Estimated BDSKY parameters:\t{format_parameters(*vs, T=T, t_start=t_start)};\tloglikelihood={lk}')
 
     if lk > best_lk:
         best_lk = lk
@@ -300,14 +304,14 @@ def infer(forest, T, la=None, psi=None, p=None, skyline_times=None,
     if ci:
         cis = estimate_cis(T, forest, input_parameters=input_params, loglikelihood_function=loglikelihood,
                            optimised_parameters=best_vs, bounds=bounds, threads=threads)
-        print(f'Estimated CIs:\n\tlower:\t{format_parameters(*cis[:, 0], epi=False, T=T)}\n'
-              f'\tupper:\t{format_parameters(*cis[:, 1], epi=False, T=T)}')
+        print(f'Estimated CIs:\n\tlower:\t{format_parameters(*cis[:, 0], epi=False, T=T, t_start=t_start)}\n'
+              f'\tupper:\t{format_parameters(*cis[:, 1], epi=False, T=T, t_start=t_start)}')
     else:
         cis = None
     return best_vs, cis
 
 
-def optimize_current_setting(bounds, n_intervals, start_parameters, input_params, forest, T, n_times_to_optimize=0, threads=1):
+def optimize_current_setting(bounds, n_intervals, start_parameters, input_params, forest, T, t_start=0, n_times_to_optimize=0, threads=1):
     """
     The idea is to optimize with skyline times fixed on the grid first,
     then constraint the time bounds around the best grid value and optimize everything one more time.
@@ -316,8 +320,8 @@ def optimize_current_setting(bounds, n_intervals, start_parameters, input_params
         return optimize_likelihood_params(forest, T=T, input_parameters=input_params,
                                             loglikelihood_function=loglikelihood, bounds=bounds,
                                             start_parameters=start_parameters, threads=threads,
-                                            formatter=lambda _: format_parameters(*_, T=T),
-                                            num_attemps=1)
+                                            formatter=lambda _: format_parameters(*_, T=T, t_start=t_start),
+                                            num_attemps=1, t_start=t_start)
     else:
         bs = np.array(bounds)
         i = len(input_params) - n_times_to_optimize
@@ -325,14 +329,14 @@ def optimize_current_setting(bounds, n_intervals, start_parameters, input_params
         step = (up - lb) / GRID_SIZE
         grid_values = np.arange(lb + step, up, step=step)
         best_interval_idx = None
-        best_lk = loglikelihood(forest, *start_parameters, T=T, threads=threads)
+        best_lk = loglikelihood(forest, *start_parameters, T=T, t_start=t_start, threads=threads)
         best_vs = start_parameters
         for idx, fixed_value in enumerate(grid_values):
             sp = np.array(start_parameters)
             sp[i] = fixed_value
             ip = np.array(input_params)
             ip[i] = fixed_value
-            vs, lk = optimize_current_setting(bs, n_intervals, sp, ip, forest, T, n_times_to_optimize - 1, threads)
+            vs, lk = optimize_current_setting(bs, n_intervals, sp, ip, forest, T, t_start, n_times_to_optimize - 1, threads)
             # ts = optimized_values2time_intervals(ip[n_intervals * 3:], T)[:-1]
             # ts = ', '.join(f'{ts[_]:g}' if not np.isnan(ts[_]) else f'[{bs[n_intervals*3 + _, 0]:g}-{bs[n_intervals*3 + _, 1]:g}]' if ip[n_intervals*3 + _] is None else f'{ip[n_intervals*3 + _] * 100:g} %' for _ in range(len(ts)))
             # print(f'Best loglk for times {ts} is {lk}')
@@ -345,7 +349,7 @@ def optimize_current_setting(bounds, n_intervals, start_parameters, input_params
                       grid_values[best_interval_idx + 1] if best_interval_idx < len(grid_values) - 1 else up)
 
         sp = np.array(best_vs)
-        vs, lk = optimize_current_setting(bs, n_intervals, sp, input_params, forest, T, n_times_to_optimize - 1, threads)
+        vs, lk = optimize_current_setting(bs, n_intervals, sp, input_params, forest, T, t_start, n_times_to_optimize - 1, threads)
 
         # ts = optimized_values2time_intervals(input_params[n_intervals * 3:], T)[:-1]
         # ts = ', '.join(f'{ts[i]:g}' if not np.isnan(
@@ -359,7 +363,7 @@ def optimize_current_setting(bounds, n_intervals, start_parameters, input_params
 
 
 
-def save_results(vs, cis, T, log, ci=False):
+def save_results(vs, cis, T, t_start, log, ci=False):
     n_intervals = (len(vs) + 1) // 4 # 3 parameters per interval + n_intervals - 1 skyline times
 
     la_array = vs[0:n_intervals * 3:3]
@@ -375,12 +379,12 @@ def save_results(vs, cis, T, log, ci=False):
     # the first one t1 as a fraction of total time (between 0 and T): t1 / T,
     # the second one t2 as a fraction of time between t1 and T: (t2 - t1) / (T - t1), etc.
     skyline_time_fractions = vs[n_intervals * 3:]
-    skyline_times = optimized_values2time_intervals(skyline_time_fractions, T)
+    skyline_times = optimized_values2time_intervals(skyline_time_fractions, T, t_start=t_start)
 
     if ci:
         skyline_time_fraction_cis = cis[n_intervals * 3:, :]
-        skyline_time_cis = np.array([optimized_values2time_intervals(skyline_time_fraction_cis[:, 0], T),
-                                     optimized_values2time_intervals(skyline_time_fraction_cis[:, 1], T)]).T
+        skyline_time_cis = np.array([optimized_values2time_intervals(skyline_time_fraction_cis[:, 0], T, t_start=t_start),
+                                     optimized_values2time_intervals(skyline_time_fraction_cis[:, 1], T, t_start=t_start)]).T
 
 
     os.makedirs(os.path.dirname(os.path.abspath(log)), exist_ok=True)
@@ -407,14 +411,14 @@ def save_results(vs, cis, T, log, ci=False):
                 f.write(f"{i},CI_max,{ci_max_line}\n")
 
 
-def format_parameters(*params, T, fixed=None, epi=True):
+def format_parameters(*params, T, t_start=0, fixed=None, epi=True):
     n_intervals = (len(params) + 1) // 4 # 3 parameters per interval + n_intervals - 1 skyline times
 
     la_array = params[0:n_intervals * 3:3]
     psi_array = params[1:n_intervals * 3:3]
     rho_array = params[2:n_intervals * 3:3]
 
-    skyline_times = optimized_values2time_intervals(params[n_intervals * 3:], T)
+    skyline_times = optimized_values2time_intervals(params[n_intervals * 3:], T=T, t_start=t_start)
 
     epi=False
 
@@ -498,8 +502,8 @@ def main():
     print('Read a forest of {} trees with {} tips in total, evolving between times {} and {}.'
           .format(len(forest), sum(len(_) for _ in forest), t_start, T))
 
-    vs, cis = infer(forest, T=T, **vars(params))
-    save_results(vs, cis, T, params.log, ci=params.ci)
+    vs, cis = infer(forest, T=T, t_start=t_start, **vars(params))
+    save_results(vs, cis, T, t_start, params.log, ci=params.ci)
 
 
 def loglikelihood_main():
@@ -544,6 +548,7 @@ def loglikelihood_main():
     # resolve_forest(forest)
     annotate_forest_with_time(forest, start_times=params.start_times)
     T = get_T(T=None, forest=forest)
+    t_start = min(getattr(tree, TIME) - tree.dist for tree in forest)
 
     n_la, n_psi, n_p = len(params.la), len(params.psi), len(params.p)
 
@@ -574,9 +579,8 @@ def loglikelihood_main():
     ps[1:n_intervals * 3:3] = params.psi
     ps[2:n_intervals * 3:3] = params.p
     if n_t:
-        ps[n_intervals * 3:] = time_intervals2optimized_values(np.concatenate((params.skyline_times, [T])))
-
-    lk = loglikelihood(forest, *ps, T=T)
+        ps[n_intervals * 3:] = time_intervals2optimized_values(np.concatenate((params.skyline_times, [T])), t_start=t_start)
+    lk = loglikelihood(forest, *ps, T=T, t_start=t_start)
     print(lk)
 
 

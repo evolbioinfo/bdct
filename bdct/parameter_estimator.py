@@ -39,7 +39,7 @@ def rescale_log(log_array):
 
 
 def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_function, bounds, start_parameters,
-                               threads=1, num_attemps=3, optimise_as_logs=None, formatter=lambda _: _):
+                               threads=1, num_attemps=3, optimise_as_logs=None, formatter=lambda _: _, t_start=0):
     """
     Optimizes the likelihood parameters for a given forest and a given MTBD model.
 
@@ -49,7 +49,7 @@ def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_functi
     """
     optimised_parameter_mask = input_parameters == None
     if np.all(optimised_parameter_mask == False):
-        return start_parameters, loglikelihood_function(forest, *start_parameters, T=T, threads=threads)
+        return start_parameters, loglikelihood_function(forest, *start_parameters, T=T, t_start=t_start, threads=threads)
 
     bounds = bounds[optimised_parameter_mask]
     if optimise_as_logs is None:
@@ -77,7 +77,7 @@ def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_functi
             # print(f"{ps}\t-->\t-inf")
             return -np.inf
         ps_real = get_real_params_from_optimised(ps)
-        res = loglikelihood_function(forest, *ps_real, T=T, threads=threads)
+        res = loglikelihood_function(forest, *ps_real, T=T, t_start=t_start, threads=threads)
         # if np.isnan(res) or res == -np.inf:
         #     print(f"{formatter(ps_real)}\t-->\t{res}")
         return -res
@@ -119,7 +119,7 @@ def optimize_likelihood_params(forest, T, input_parameters, loglikelihood_functi
 
 
 def estimate_cis(T, forest, input_parameters, loglikelihood_function, optimised_parameters, bounds, threads=1,
-                 optimise_as_logs=None, parameter_transformers=None):
+                 optimise_as_logs=None, parameter_transformers=None, t_start=0):
     optimised_cis = np.array(bounds)
     fixed_parameter_mask = input_parameters != None
     optimised_cis[fixed_parameter_mask, 0] = input_parameters[fixed_parameter_mask]
@@ -127,7 +127,7 @@ def estimate_cis(T, forest, input_parameters, loglikelihood_function, optimised_
 
     n_optimized_params = len(input_parameters[~fixed_parameter_mask])
     print(f'Estimating CIs for {n_optimized_params} free parameters...')
-    lk_threshold = (loglikelihood_function(forest, *optimised_parameters, T=T, threads=threads)
+    lk_threshold = (loglikelihood_function(forest, *optimised_parameters, T=T, t_start=t_start, threads=threads)
                     - get_chi2_threshold(num_parameters=n_optimized_params))
 
     def binary_search(v_min, v_max, get_lk, lower=True):
@@ -160,7 +160,7 @@ def estimate_cis(T, forest, input_parameters, loglikelihood_function, optimised_
                                               loglikelihood_function=loglikelihood_function,
                                               bounds=optimised_cis, start_parameters=rps,
                                               threads=threads, num_attemps=1,
-                                              optimise_as_logs=optimise_as_logs)[-1]
+                                              optimise_as_logs=optimise_as_logs, t_start=t_start)[-1]
 
         optimised_cis[i, 0] = binary_search(optimised_cis[i, 0], optimised_value, get_lk, True)
         optimised_cis[i, 1] = binary_search(optimised_value, optimised_cis[i, 1], get_lk, False)

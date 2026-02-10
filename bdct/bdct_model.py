@@ -309,7 +309,7 @@ def preprocess_forest(forest, start_times=None):
     preannotate_notifiers(forest)
 
 
-def loglikelihood(forest, la, psi, phi, rho, upsilon, T, threads=1, u=-1):
+def loglikelihood(forest, la, psi, phi, rho, upsilon, T, threads=1, u=-1, **kwargs):
     c1 = get_c1(la=la, psi=psi, rho=rho)
     c2 = get_c2(la=la, psi=psi, c1=c1)
     log_la, log_psi, log_phi, log_rho, log_not_rho, log_ups, log_not_ups, log_2 = \

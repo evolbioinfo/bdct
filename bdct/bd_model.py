@@ -80,7 +80,7 @@ def get_start_parameters(forest, la=None, psi=None, rho=None):
     return np.array([la_est, psi_est, rho_est], dtype=np.float64)
 
 
-def loglikelihood(forest, la, psi, rho, T, threads=1, u=-1):
+def loglikelihood(forest, la, psi, rho, T, threads=1, u=-1, **kwargs):
     c1 = get_c1(la=la, psi=psi, rho=rho)
     c2 = get_c2(la=la, psi=psi, c1=c1)
 
