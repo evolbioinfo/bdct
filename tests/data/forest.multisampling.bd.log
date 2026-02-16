@@ -1,0 +1,4 @@
+,R0,infectious time,sampling probability 1,sampling probability 2,transmission rate,removal rate
+value,3.87779,9.09091,0.391492,0.554241,0.426557,0.11
+CI_min,3.28842,9.09091,0.243918,0.335576,0.361726,0.11
+CI_max,4.46709,9.09091,0.616117,0.896396,0.491379,0.11
