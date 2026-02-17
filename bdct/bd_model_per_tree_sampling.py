@@ -162,7 +162,7 @@ def infer_per_tree_rho(forest, T,
             print(f"All rhos fixed to {float(p):.6g}")
         else:
             print(f"Rhos fixed per tree: {list(map(float, p))}")
-    def lk_wrapper(forest, *ps, T, threads=1):
+    def lk_wrapper(forest, *ps, T, threads=1, t_start=None, **kwargs):
         ps = np.asarray(ps, dtype=float)
         return loglikelihood_per_tree_rho(
             forest,
