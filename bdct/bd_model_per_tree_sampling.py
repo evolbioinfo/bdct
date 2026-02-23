@@ -251,8 +251,10 @@ def main():
                         help="transmission rate (if not provided, will be estimated)")
     parser.add_argument('--psi', required=False, default=None, type=float,
                         help="removal rate (if not provided, will be estimated)")
-    parser.add_argument('--p', required=False, default=None, type=float,
-                        help='sampling probability (if not provided, will be estimated)')
+    parser.add_argument('--p', nargs='+', required=False, default=None, type=float,
+                        help='Sampling probability (if not provided, will be estimated).'
+                             'Provide one value for a single rho, or multiple values (one per tree). '
+                             'Example: --p 0.3  or  --p 0.19 0.43')
     parser.add_argument('--start_times', nargs='*', type=float,
                         help='If multiple trees are provided in the input file, their start times '
                              '(i.e., times at the beginning of their root branches) are by default considered to be equal. '
@@ -273,12 +275,25 @@ def main():
         raise ValueError('At least one of the model parameters needs to be specified for identifiability')
 
     forest = read_forest(params.nwk)
+    n_trees = len(forest)
     # resolve_forest(forest)
     annotate_forest_with_time(forest, start_times=params.start_times)
     t_start = min(getattr(tree, TIME) - tree.dist for tree in forest)
     T = get_T(T=None, forest=forest)
     print('Read a forest of {} trees with {} tips in total, evolving between times {} and {}.'
           .format(len(forest), sum(len(_) for _ in forest), t_start, T))
+
+    # Normalize p (None / scalar / per-tree list)
+    if params.p is not None:
+        if len(params.p) not in (1, n_trees):
+            raise ValueError(
+                f"--p expects either 1 value (global rho) or {n_trees} values (one per tree in the given forest)"
+            )
+        if len(params.p) == 1:
+            params.p = params.p[0]  # scalar
+        else:
+            # per-tree fixed rhos -> we must use infer_per_tree_rho
+            params.p_per_tree = True
 
     if params.p_per_tree:
         vs, cis = infer_per_tree_rho(forest, T=T, **vars(params))
