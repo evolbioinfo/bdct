@@ -7,21 +7,20 @@ import os
 localrules: all
 
 folder = os.path.abspath(config.get("folder", '.'))
-sim_folder = os.path.abspath(config.get("sf", os.path.join(folder, 'medium')))
-# sim_folder = os.path.abspath(config.get("sf", os.path.join(folder, 'small')))
 n = int(config.get("n", 100))
 REPETITIONS = list(range(n))
 
-m, M = int(config.get('min', 500)), int(config.get('max', 1000))
+mint, maxt = int(config.get('mint', 500)), int(config.get('maxt', 1000))
 # m, M = int(config.get('min', 50)), int(config.get('max', 100))
+sim_folder = os.path.join(folder, f'{mint}_{maxt}')
 
 rule all:
     input:
         expand(os.path.join(sim_folder, '{model}', 'tree.{i}.nwk'), i=REPETITIONS, model=['BDMULT', 'BD', 'BDSSMULT'])
     shell:
         """
-        snakemake --snakefile Snakefile_estimate --keep-going --cores 12 --config n={n} sf={sim_folder} --unlock 2> /dev/null
-        snakemake --snakefile Snakefile_estimate --keep-going --cores 12 --config n={n} sf={sim_folder}
+        snakemake --snakefile Snakefile_estimate --keep-going --cores 12 --config n={n} mint={mint} maxt={maxt} --unlock 2> /dev/null
+        snakemake --snakefile Snakefile_estimate --keep-going --cores 12 --config n={n} mint={mint} maxt={maxt}
         """
 
 
@@ -39,22 +38,32 @@ rule simulate_bd_mult:
         name = 'simulate_{i}',
         qos = 'fast'
     threads: 1
-    # singularity: "docker://evolbioinfo/treesimulator:v0.1.19"
+    singularity: "docker://evolbioinfo/treesimulator:v0.2.27"
     shell:
         """
-        while [ ! -f {output.nwk} ]
-        do
-            timeout 60s python3 py/tree_generator.py --min_tips {m} --max_tips {M} --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
-        done
+        python3 py/generate_tree_sets.py --log {output.log} --nwk {output.nwk} \
+        --min_tips {mint} --max_tips {maxt} \
+        --n 1 \
+        --min_R 1 \
+        --max_R 10  \
+        --min_d 1  \
+        --max_d 31  \
+        --min_rho 0.05  \
+        --max_rho 0.75  \
+        --min_fss 0.  \
+        --max_fss 0.  \
+        --min_xss 1  \
+        --max_xss 1 \
+        --min_recipients 1 \
+        --max_recipients 21 \
+        --model BD
         """
 
 
 rule simulate_bd:
     '''
-    Simulate a BD tree for the same parameters as the corresponding BD-MULT tree.
+    Simulate a BD tree.
     '''
-    input:
-        log=os.path.join(sim_folder, 'BDMULT', 'tree.{i}.log'),
     output:
         log=os.path.join(sim_folder, 'BD', 'tree.{i}.log'),
         nwk=os.path.join(sim_folder, 'BD', 'tree.{i}.nwk')
@@ -63,27 +72,32 @@ rule simulate_bd:
         name='simulate_{i}',
         qos='fast'
     threads: 1
-    # singularity: "docker://evolbioinfo/treesimulator:v0.1.19"
+    singularity: "docker://evolbioinfo/treesimulator:v0.2.27"
     shell:
         """
-        p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
-        la=`tail -n 1 {input.log} | awk -F',' '{{ print $4 }}'`
-        psi=`tail -n 1 {input.log} | awk -F',' '{{ print $5 }}'`
-        cat {input.log}
-
-        while [ ! -f {output.nwk} ]
-        do
-            timeout 10m generate_bd --min_tips {m} --max_tips {M} --la $la --psi $psi --p $p --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
-        done
+        python3 py/generate_tree_sets.py --log {output.log} --nwk {output.nwk} \
+        --min_tips {mint} --max_tips {maxt} \
+        --n 1 \
+        --min_R 1 \
+        --max_R 10  \
+        --min_d 1  \
+        --max_d 31  \
+        --min_rho 0.05  \
+        --max_rho 0.75  \
+        --min_fss 0.  \
+        --max_fss 0.  \
+        --min_xss 1  \
+        --max_xss 1 \
+        --min_recipients 1 \
+        --max_recipients 1 \
+        --model BD
         """
 
 
 rule simulate_bdss_mult:
     '''
-    Simulate a BDSS-MULT tree for the same parameters as the corresponding BD-MULT tree.
+    Simulate a BDSS-MULT tree.
     '''
-    input:
-        log=os.path.join(sim_folder, 'BDMULT', 'tree.{i}.log'),
     output:
         log=os.path.join(sim_folder, 'BDSSMULT', 'tree.{i}.log'),
         nwk=os.path.join(sim_folder, 'BDSSMULT', 'tree.{i}.nwk')
@@ -92,16 +106,23 @@ rule simulate_bdss_mult:
         name='simulate_{i}',
         qos='fast'
     threads: 1
-    # singularity: "docker://evolbioinfo/treesimulator:v0.1.19"
+    singularity: "docker://evolbioinfo/treesimulator:v0.2.27"
     shell:
         """
-        p=`tail -n 1 {input.log} | awk -F',' '{{ print $3 }}'`
-        la=`tail -n 1 {input.log} | awk -F',' '{{ print $4 }}'`
-        psi=`tail -n 1 {input.log} | awk -F',' '{{ print $5 }}'`
-        cat {input.log}
-
-        while [ ! -f {output.nwk} ]
-        do
-            timeout 60s python3 py/tree_generator_bdssmult.py --min_tips {m} --max_tips {M} --nwk {output.nwk} --log {output.log} || echo 'The tree took too long, restarting!'
-        done
+        python3 py/generate_tree_sets.py --log {output.log} --nwk {output.nwk} \
+        --min_tips {mint} --max_tips {maxt} \
+        --n 1 \
+        --min_R 1 \
+        --max_R 10  \
+        --min_d 1  \
+        --max_d 31  \
+        --min_rho 0.05  \
+        --max_rho 0.75  \
+        --min_fss 0.05  \
+        --max_fss 0.5  \
+        --min_xss 5  \
+        --max_xss 20 \
+        --min_recipients 1 \
+        --max_recipients 2 \
+        --model BDSS
         """

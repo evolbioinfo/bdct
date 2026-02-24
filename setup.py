@@ -25,9 +25,11 @@ setup(
                 'bdpn_infer = bdpn.bdpn_model:main',
                 'bd_infer = bdpn.bd_model:main',
                 'bdmult_infer = bdpn.bdmult_model:main',
+                'bdssmult_infer = bdpn.bdssmult_model:main',
                 'bdpn_loglikelihood = bdpn.bdpn_model:loglikelihood_main',
                 'bd_loglikelihood = bdpn.bd_model:loglikelihood_main',
                 'bdmult_loglikelihood = bdpn.bdmult_model:loglikelihood_main',
+                'bdssmult_loglikelihood = bdpn.bdssmult_model:loglikelihood_main',
                 'pn_test = bdpn.model_distinguisher:main',
             ]
     },
